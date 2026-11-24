@@ -17,7 +17,15 @@ try {
   const page=await application.firstWindow();await page.waitForLoadState('domcontentloaded');
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await expect(page.locator('#profile-name')).toHaveText('Wooden mechanical');
-  if(process.env.FUNNYBOARD_QA_PROFILE){
+  if(process.env.FUNNYBOARD_QA_AUDIO){
+    await page.locator('#browse-profiles').click();await page.locator('#new-audio-profile').click();
+    await page.locator('#audio-profile-name').fill('Desktop audio check');
+    await page.locator('#profile-audio-file').setInputFiles(path.resolve(process.env.FUNNYBOARD_QA_AUDIO));
+    await expect(page.locator('#create-audio-profile-submit')).toBeEnabled();await page.locator('#create-audio-profile-submit').click();
+    await expect(page.locator('#profile-name')).toHaveText('Desktop audio check');
+    const gain=await page.evaluate(()=>{const s=JSON.parse(localStorage.getItem('funnyboard.settings.v1'));return s.customProfiles.find(p=>p.id===s.profile).gain;});
+    expect(Number.isFinite(gain)&&gain>0).toBe(true);
+  }else if(process.env.FUNNYBOARD_QA_PROFILE){
     await page.locator('#browse-profiles').click();
     await page.getByRole('button',{name:`Use ${process.env.FUNNYBOARD_QA_PROFILE} profile`,exact:true}).click();
     await expect(page.locator('#profile-name')).toHaveText(process.env.FUNNYBOARD_QA_PROFILE);
@@ -49,7 +57,7 @@ try {
   execFileSync('python3',[path.resolve('scripts/test-x11-keys.py')]);
   // Other physical keys may arrive from an active desktop during this check.
   await expect.poll(()=>page.evaluate(()=>['KeyA','Space'].every(code=>window.globalKeys.some(key=>key.down&&key.code===code)))).toBe(true);
-  const continuous=PROFILES.find(profile=>profile.name===process.env.FUNNYBOARD_QA_PROFILE)?.continuous;
+  const continuous=process.env.FUNNYBOARD_QA_AUDIO||PROFILES.find(profile=>profile.name===process.env.FUNNYBOARD_QA_PROFILE)?.continuous;
   await expect.poll(()=>page.evaluate(()=>window.sourcesPlayed)).toBeGreaterThanOrEqual(continuous?1:2);
   await expect(page.locator('#editor')).toHaveValue('A little more joy in every keystroke.');
   // Muting must also suppress sounds from background key events.

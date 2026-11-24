@@ -1,13 +1,15 @@
 import { PROFILES } from './model.js';
+import { profileVolumeGain } from './profile-audio.js';
 const PRESET_FILES = PROFILES.flatMap(profile=>(profile.continuous?['flow']:['key','space','enter']).map(kind=>`${profile.sound}-${kind}`));
 const FLOW_HOLD_MS=400;
 const FLOW_FADE_MS=70;
 
 export class SoundEngine {
-  constructor() {
+  constructor({loadUpload}={}) {
     this.context=null; this.master=null; this.buffers=new Map(); this.raw=new Map(); this.pending=new Map();
     this.volume=0.65; this.muted=false; this.sources=new Set();
     this.flow=null;this.flowOffsets=new Map();this.flowIdleTimer=null;this.flowStopTimer=null;
+    this.loadUpload=loadUpload;this.uploadLoads=new Map();this.previewNode=null;this.previewGain=null;this.previewLevel=1;
     this.ready = Promise.all(PRESET_FILES.map(id=>
       fetch(new URL(`./assets/sounds/${id}.wav`, import.meta.url)).then(r=>{if(!r.ok) throw new Error('Could not load built-in sounds'); return r.arrayBuffer();}).then(data=>this.raw.set(id,data))
     ));
@@ -20,7 +22,7 @@ export class SoundEngine {
     if(this.context.state==='suspended') await this.context.resume();
     await this.ready;
   }
-  setVolume(value) { this.volume=Math.max(0,Math.min(1,Number(value))); if(this.master) this.master.gain.setTargetAtTime(this.muted?0:this.volume,this.context.currentTime,0.008); }
+  setVolume(value) { this.volume=Math.max(0,Math.min(1,Number(value))); if(this.master) this.master.gain.setTargetAtTime(this.muted?0:this.volume,this.context.currentTime,0.008);if(this.previewGain)this.previewGain.gain.setTargetAtTime(this.volume*this.previewLevel,this.context.currentTime,.008); }
   setMuted(muted) { this.muted=Boolean(muted); if(this.muted)this.stopFlow(); this.setVolume(this.volume); }
   stopFlow() {
     clearTimeout(this.flowIdleTimer);clearTimeout(this.flowStopTimer);
@@ -31,7 +33,7 @@ export class SoundEngine {
     flow.gain.gain.cancelAndHoldAtTime(now);flow.gain.gain.linearRampToValueAtTime(0,end);
     flow.source.stop(end);
   }
-  playFlow(buffer,sound,preview) {
+  playFlow(buffer,sound,preview,level=1) {
     const bypassMaster=preview&&this.muted;
     if(this.flow&&(this.flow.sound!==sound||this.flow.bypassMaster!==bypassMaster))this.stopFlow();
     clearTimeout(this.flowIdleTimer);clearTimeout(this.flowStopTimer);
@@ -46,7 +48,7 @@ export class SoundEngine {
     }
     const flow=this.flow,now=this.context.currentTime;
     flow.gain.gain.cancelAndHoldAtTime(now);
-    flow.gain.gain.linearRampToValueAtTime(bypassMaster?this.volume:1,now+0.006);
+    flow.gain.gain.linearRampToValueAtTime(level*(bypassMaster?this.volume:1),now+0.006);
     // A new press extends this same stream. After a pause, resume its cursor.
     this.flowIdleTimer=setTimeout(()=>{
       if(this.flow!==flow)return;
@@ -63,8 +65,15 @@ export class SoundEngine {
   }
   async prepare() {
     await this.unlock();
-    await Promise.all([...this.raw].map(([id,data])=>this.decode(id,data)));
+    await Promise.all(PRESET_FILES.map(id=>this.decode(id,this.raw.get(id))));
   }
+  async balanceProfile(buffer) {await this.prepare();return profileVolumeGain(buffer,PROFILES.filter(profile=>!profile.continuous).map(profile=>this.buffers.get(`${profile.sound}-key`)));}
+  async setProfilePreview(element,level) {
+    await this.unlock();
+    if(!this.previewNode){this.previewNode=this.context.createMediaElementSource(element);this.previewGain=this.context.createGain();this.previewNode.connect(this.previewGain);this.previewGain.connect(this.context.destination);}
+    this.previewLevel=level;this.previewGain.gain.value=this.volume*level;
+  }
+  releaseUpload(id) {this.raw.delete(id);this.buffers.delete(id);}
   async addUpload(id,data) { this.raw.set(id,data); await this.unlock(); return this.decode(id,data); }
   async play(code,binding,{preview=false}={}) {
     if(this.muted && !preview) return;
@@ -72,12 +81,17 @@ export class SoundEngine {
     if(this.muted && !preview)return;
     const profile=binding.type==='preset'?PROFILES.find(profile=>profile.sound===binding.sound):null;
     const kind=code==='Space'?'space':(/Enter/.test(code)?'enter':'key');
-    const id=binding.type==='upload'?binding.assetId:`${binding.sound}-${profile?.continuous?'flow':kind}`;
+    const uploaded=binding.type==='upload'||binding.type==='flow';
+    const id=uploaded?binding.assetId:`${binding.sound}-${profile?.continuous?'flow':kind}`;
     let buffer=this.buffers.get(id);
+    if(!buffer&&!this.raw.has(id)&&uploaded&&this.loadUpload){
+      if(!this.uploadLoads.has(id))this.uploadLoads.set(id,Promise.resolve(this.loadUpload(id)).then(data=>{if(data)this.raw.set(id,data);}).finally(()=>this.uploadLoads.delete(id)));
+      await this.uploadLoads.get(id);
+    }
     if(!buffer && this.raw.has(id)) buffer=await this.decode(id,this.raw.get(id));
-    if(!buffer) return;
+    if(!buffer){if(uploaded)throw new Error('Saved audio is unavailable.');return;}
     if(this.muted&&!preview)return;
-    if(profile?.continuous){this.playFlow(buffer,binding.sound,preview);return;}
+    if(profile?.continuous||binding.type==='flow'){this.playFlow(buffer,uploaded?id:binding.sound,preview,binding.type==='flow'&&Number.isFinite(binding.gain)?Math.max(0,Math.min(1e6,binding.gain)):1);return;}
     this.stopFlow();
     // Bound concurrency so long uploads cannot pile up while typing quickly.
     if(this.sources.size>=24) this.sources.values().next().value.stop();

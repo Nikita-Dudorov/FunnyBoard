@@ -4,15 +4,15 @@ A little more joy in every keystroke. A desktop writing space with wooden mechan
 
 ## Install and open
 
-**Ubuntu / Debian:** open `release/funnyboard_1.0.1_amd64.deb` with your software installer, or run:
+**Ubuntu / Debian:** open `release/funnyboard_1.0.2_amd64.deb` with your software installer, or run:
 
 ```bash
-sudo apt install ./release/funnyboard_1.0.1_amd64.deb
+sudo apt install ./release/funnyboard_1.0.2_amd64.deb
 ```
 
 Then open **FunnyBoard** from your applications menu. The installer bundles everything; Node.js and Python are not needed.
 
-**Portable Linux:** make `release/FunnyBoard-1.0.1.AppImage` executable in its file properties and open it. AppImage requires FUSE. If FUSE is unavailable, run `./FunnyBoard-1.0.1.AppImage --appimage-extract` and open `squashfs-root/funnyboard`. The Debian installer is recommended on Ubuntu because it also configures the Chromium sandbox.
+**Portable Linux:** make `release/FunnyBoard-1.0.2.AppImage` executable in its file properties and open it. AppImage requires FUSE. If FUSE is unavailable, run `./FunnyBoard-1.0.2.AppImage --appimage-extract` and open `squashfs-root/funnyboard`. The Debian installer is recommended on Ubuntu because it also configures the Chromium sandbox.
 
 **Windows and macOS:** native installer builds are configured and can be generated on their respective operating systems using the commands below or the included GitHub Actions workflow. Those installers have not been built or tested in this Linux workspace. Release builds are unsigned unless signing credentials are supplied.
 
@@ -24,7 +24,9 @@ Then open **FunnyBoard** from your applications menu. The installer bundles ever
 4. Choose **FunnyBoard only** or **Everywhere**. Everywhere plays sounds in other apps, including while FunnyBoard is minimized. Closing its window in this mode keeps it in the system tray. The tray menu opens, mutes, or quits the app. In FunnyBoard-only mode, closing the window quits.
 5. Use the volume slider and sound toggle. **Ctrl/Cmd + Shift + M** toggles sound while FunnyBoard is focused. Explicit preview buttons play a sample even when typing sounds are muted.
 
-Notes, volume, the selected profile, and bindings save automatically on your device. Profiles have independent key bindings. **Save as new profile** copies your current setup. **Export current profile** creates a JSON backup including uploaded audio; **Import profile** restores it as a new profile. The download button above the note saves a plain text file.
+To create a continuous profile, open **All profiles → Create profile from audio**, give it a name, and choose one audio file (up to **25 MB / 5 minutes**). Preview it, then select **Create profile**. Loudness is balanced automatically with the built-in profiles while preserving the full file, its pitch, and stereo channels. Each press continues playback; pauses fade out and save the position for the next press.
+
+Notes, volume, the selected profile, and bindings save automatically on your device. Profiles have independent key bindings. **Copy current profile** copies your current setup. **Export current profile** creates a JSON backup including the full uploaded audio; **Import profile** restores it as a new profile and balances its loudness automatically. Existing profile backups remain supported. The download button above the note saves a plain text file.
 
 ## Everywhere mode
 
@@ -61,6 +63,6 @@ The repository includes a manual/tag-triggered GitHub Actions workflow to build 
 
 ## Implementation
 
-The UI uses plain HTML, CSS, and JavaScript with no frontend runtime dependencies. Web Audio buffers are preloaded for overlapping, low-latency playback. PCM sounds are bundled with the app. Uploaded audio is stored in IndexedDB; notes and settings use local storage. Electron provides a sandboxed window and a narrow preload bridge; `uiohook-napi` supplies the optional system-wide listener. No keyboard text is passed through the native bridge.
+The UI uses plain HTML, CSS, and JavaScript with no frontend runtime dependencies. Web Audio buffers provide overlapping, low-latency playback. PCM sounds are bundled with the app. Uploaded audio is stored in IndexedDB and loaded when needed; notes and settings use local storage. Continuous profiles use automatic gain adjustment with peak headroom, leaving stored audio unchanged. Electron provides a sandboxed window and a narrow preload bridge; `uiohook-napi` supplies the optional system-wide listener. No keyboard text is passed through the native bridge.
 
 Run `python3 scripts/generate-assets.py` to refresh generated assets (Pillow is needed for icons). DM Sans is bundled under the SIL Open Font License in `src/assets/fonts/OFL.txt`. Application source and generated sounds/icons use the MIT license.

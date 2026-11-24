@@ -1,12 +1,14 @@
 import { PROFILES, KEY_ROWS, keyName, profileFor, soundFor, noteStats, validKeyCode, validateProfile } from './model.js';
 import { SoundEngine } from './audio.js';
-import { readSettings, saveSettings, readNote, saveNote, getSounds, putSound, deleteSound } from './store.js';
+import { readSettings, saveSettings, readNote, saveNote, getSound, getSoundIds, putSound, deleteSound } from './store.js';
+import { audioFileMime, MAX_PROFILE_AUDIO_BYTES, MAX_PROFILE_AUDIO_SECONDS, MAX_PROFILE_IMPORT_BYTES } from './profile-audio.js';
 
 const $=id=>document.getElementById(id);
 const settings=readSettings();
-const engine=new SoundEngine();
 const desktop=window.funnyboard;
 const assets=new Map();
+const engine=new SoundEngine({loadUpload:async id=>(await getAsset(id))?.data});
+let pendingProfileAudio=null,profileAudioURL=null,profileAudioRequest=0;
 let selectedKey='KeyA', capturing=false, toastTimer, saveTimer, rhythmTimer, sessionStart=0, sessionKeys=0, previewToken=0;
 let storageWarning=false, soundWarning=false;
 const keyElements=new Map();
@@ -14,6 +16,7 @@ const pressed=new Set();
 const allProfiles=()=>[...PROFILES,...settings.customProfiles];
 const currentProfile=()=>profileFor(settings.profile,allProfiles());
 const currentBinding=code=>soundFor(code,currentProfile(),settings.bindings);
+async function getAsset(id){if(!assets.has(id)){const asset=await getSound(id);if(asset)assets.set(id,asset);}return assets.get(id);}
 
 function toast(message,error=false) {
   clearTimeout(toastTimer); $('toast').textContent=message; $('toast').classList.toggle('error',error); $('toast').hidden=false;
@@ -164,7 +167,70 @@ async function uploadAudio(file) {
 }
 async function cleanupUnusedAudio() {
   const used=new Set(Object.values(settings.bindings).filter(binding=>binding.type==='upload').map(binding=>binding.assetId));
-  for(const [id] of assets) if(!used.has(id)){await deleteSound(id);assets.delete(id);engine.buffers.delete(id);engine.raw.delete(id);}
+  for(const profile of settings.customProfiles)if(profile.audioAssetId)used.add(profile.audioAssetId);
+  for(const id of await getSoundIds())if(!used.has(id)){await deleteSound(id);assets.delete(id);engine.releaseUpload(id);}
+}
+function makeAudioProfile(id,name,audioAssetId,gain){return{id,name,short:name,adjective:'Your own rhythm.',description:'Keeps moving while you type and pauses when you do.',tag:'YOUR OWN MIX',icon:'durka',color:'#8c7c9a',sound:'upload',continuous:true,audioAssetId,gain};}
+function resetProfileAudio(){
+  profileAudioRequest++;
+  const player=$('profile-audio-preview');player.pause();player.removeAttribute('src');player.load();player.hidden=true;
+  if(profileAudioURL)URL.revokeObjectURL(profileAudioURL);profileAudioURL=null;
+  if(pendingProfileAudio&&!pendingProfileAudio.saved)engine.releaseUpload(pendingProfileAudio.asset.id);
+  pendingProfileAudio=null;$('create-audio-profile-submit').disabled=true;$('profile-audio-file').value='';
+}
+function openAudioProfile(){
+  resetProfileAudio();engine.stopFlow();previewToken++;
+  $('audio-profile-form').reset();$('profile-audio-status').textContent='Choose one audio file to get started.';
+  $('profile-audio-error').hidden=true;$('audio-profile-dialog').showModal();
+}
+async function loadProfileAudio(file){
+  if(!file)return;
+  resetProfileAudio();const request=profileAudioRequest,id=crypto.randomUUID();
+  $('profile-audio-error').hidden=true;$('profile-audio-status').textContent='Checking audio and balancing volume…';
+  try{
+    const mime=audioFileMime(file);
+    if(!mime)throw new Error('Choose an audio file, such as WAV, MP3, or OGG.');
+    if(file.size>MAX_PROFILE_AUDIO_BYTES)throw new Error('Choose an audio file smaller than 25 MB.');
+    const player=$('profile-audio-preview');profileAudioURL=URL.createObjectURL(file);
+    const duration=await new Promise((resolve,reject)=>{
+      const finish=(error)=>{clearTimeout(timer);player.removeEventListener('loadedmetadata',loaded);player.removeEventListener('error',failed);error?reject(error):resolve(player.duration);};
+      const loaded=()=>finish();const failed=()=>finish(new Error('This audio could not be read. Try another file.'));
+      const timer=setTimeout(()=>finish(new Error('This audio could not be read. Try another file.')),10000);
+      player.addEventListener('loadedmetadata',loaded);player.addEventListener('error',failed);player.src=profileAudioURL;player.load();
+    });
+    if(request!==profileAudioRequest)return;
+    if(!Number.isFinite(duration)||duration<=0||duration>MAX_PROFILE_AUDIO_SECONDS)throw new Error('Choose audio up to 5 minutes long.');
+    const data=await file.arrayBuffer();const buffer=await engine.addUpload(id,data);const gain=await engine.balanceProfile(buffer);
+    if(request!==profileAudioRequest){engine.releaseUpload(id);return;}
+    await engine.setProfilePreview(player,gain);
+    if(request!==profileAudioRequest){engine.releaseUpload(id);return;}
+    pendingProfileAudio={asset:{id,name:file.name,data,mime},gain};
+    if(!$('audio-profile-name').value.trim())$('audio-profile-name').value=file.name.replace(/\.[^.]+$/,'').slice(0,60);
+    player.hidden=false;$('create-audio-profile-submit').disabled=false;
+    $('profile-audio-status').textContent=`${file.name} · ${Math.floor(buffer.duration/60)}:${String(Math.floor(buffer.duration%60)).padStart(2,'0')} · Volume balanced automatically`;
+  }catch(error){
+    engine.releaseUpload(id);
+    if(request!==profileAudioRequest)return;
+    $('profile-audio-preview').pause();$('profile-audio-preview').hidden=true;
+    $('profile-audio-status').textContent='Choose one audio file to get started.';
+    $('profile-audio-error').textContent=error.message||'Could not load that audio.';$('profile-audio-error').hidden=false;
+  }
+}
+async function createAudioProfile(){
+  const pending=pendingProfileAudio,name=$('audio-profile-name').value.trim(),request=profileAudioRequest;if(!pending||!name)return;
+  const button=$('create-audio-profile-submit');button.disabled=true;button.textContent='Saving…';
+  let stored=false;
+  try{
+    await putSound(pending.asset);stored=true;
+    if(request!==profileAudioRequest){await deleteSound(pending.asset.id);stored=false;return;}
+    const profile=makeAudioProfile(crypto.randomUUID(),name,pending.asset.id,pending.gain);
+    const next={...settings,profile:profile.id,customProfiles:[...settings.customProfiles,profile]};
+    saveSettings(next);Object.assign(settings,next);assets.set(pending.asset.id,pending.asset);pending.saved=true;
+    $('audio-profile-dialog').close();renderProfiles();await selectProfile(profile.id);toast(`“${name}” is ready. Start typing.`);
+  }catch{
+    if(stored)await deleteSound(pending.asset.id).catch(()=>{});
+    if(request===profileAudioRequest){$('profile-audio-error').textContent='Could not save this profile. Check available device storage and try again.';$('profile-audio-error').hidden=false;}
+  }finally{button.textContent='Create profile';button.disabled=!pendingProfileAudio;}
 }
 function download(blob,filename) {
   const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download=filename;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),10000);
@@ -184,12 +250,15 @@ async function exportProfile() {
       const code=id.slice(profile.id.length+1);
       if(binding.type==='preset')bindings[code]={...binding};
       else {
-        const asset=assets.get(binding.assetId);if(!asset)throw new Error('Missing sound');
+        const asset=await getAsset(binding.assetId);if(!asset)throw new Error('Missing sound');
         bindings[code]={type:'upload',name:asset.name,data:arrayBufferToDataURL(asset.data,asset.mime)};
       }
     }
-    const data={format:'funnyboard-profile',version:1,name:profile.name,sound:profile.sound,bindings};
-    download(new Blob([JSON.stringify(data)],{type:'application/json'}),`${profile.name.replace(/[^a-z0-9]+/gi,'-').toLowerCase()}.funnyboard.json`);
+    let data={format:'funnyboard-profile',version:1,name:profile.name,sound:profile.sound,bindings};
+    if(profile.audioAssetId){const asset=await getAsset(profile.audioAssetId);if(!asset)throw new Error('Missing sound');data={format:'funnyboard-profile',version:2,name:profile.name,continuous:true,audio:{name:asset.name,data:arrayBufferToDataURL(asset.data,asset.mime)},bindings};}
+    const blob=new Blob([JSON.stringify(data)],{type:'application/json'});
+    if(blob.size>MAX_PROFILE_IMPORT_BYTES)throw new Error('Profile is too large to export.');
+    download(blob,`${profile.name.replace(/[^a-z0-9]+/gi,'-').toLowerCase()}.funnyboard.json`);
     toast('Profile exported, custom sounds included.');
   } catch{toast('Could not export the profile. Please try again.',true);}
 }
@@ -197,21 +266,30 @@ async function importProfile(file) {
   if(!file)return;
   const importedAssets=[];
   try {
-    if(file.size>40_000_000)throw new Error('Choose a profile smaller than 40 MB.');
+    if(file.size>MAX_PROFILE_IMPORT_BYTES)throw new Error('Choose a profile smaller than 64 MB.');
     const data=validateProfile(JSON.parse(await file.text()));
     const id=crypto.randomUUID(),base=profileFor(data.sound),bindings={};
+    const readAudio=async(audio,continuous)=>{
+      const [meta,encoded]=audio.data.split(',');const mime=meta.slice(5,-7);const binary=atob(encoded);
+      const bytes=Uint8Array.from(binary,char=>char.charCodeAt(0));
+      if(bytes.byteLength>(continuous?MAX_PROFILE_AUDIO_BYTES:5*1024*1024))throw new Error('An audio file in this profile is too large.');
+      const assetId=crypto.randomUUID();importedAssets.push(assetId);
+      const buffer=await engine.addUpload(assetId,bytes.buffer);
+      if(!continuous&&buffer.duration>3)throw new Error('A key sound in this profile exceeds 3 seconds.');
+      const gain=continuous?await engine.balanceProfile(buffer):1;
+      const asset={id:assetId,name:audio.name,data:bytes.buffer,mime};await putSound(asset);assets.set(assetId,asset);
+      return{assetId,gain};
+    };
+    let profile;
+    if(data.version===2){const audio=await readAudio(data.audio,true);profile=makeAudioProfile(id,data.name.trim(),audio.assetId,audio.gain);}
+    else profile={...base,id,name:data.name.trim(),tag:'YOUR OWN MIX',description:'A custom collection of sounds, made for your keyboard.',adjective:'A sound that’s all your own.'};
     for(const [code,binding] of Object.entries(data.bindings)) {
       if(binding.type==='preset'){bindings[`${id}:${code}`]={type:'preset',sound:binding.sound};continue;}
-      const [meta,encoded]=binding.data.split(',');const mime=meta.slice(5,-7);const binary=atob(encoded);
-      const bytes=Uint8Array.from(binary,char=>char.charCodeAt(0));
-      const assetId=crypto.randomUUID();const audio=await engine.addUpload(assetId,bytes.buffer);
-      importedAssets.push(assetId);
-      if(audio.duration>3)throw new Error('A sound in this profile exceeds 3 seconds.');
-      const asset={id:assetId,name:binding.name,data:bytes.buffer,mime};await putSound(asset);assets.set(assetId,asset);
-      bindings[`${id}:${code}`]={type:'upload',assetId,name:binding.name};
+      const audio=await readAudio(binding,false);
+      bindings[`${id}:${code}`]={type:'upload',assetId:audio.assetId,name:binding.name};
     }
-    settings.customProfiles.push({...base,id,name:data.name.trim(),tag:'YOUR OWN MIX',description:'A custom collection of sounds, made for your keyboard.',adjective:'A sound that’s all your own.'});
-    Object.assign(settings.bindings,bindings);settings.profile=id;persist();updateProfileUI();renderProfiles();
+    const next={...settings,customProfiles:[...settings.customProfiles,profile],bindings:{...settings.bindings,...bindings},profile:id};
+    saveSettings(next);Object.assign(settings,next);updateProfileUI();renderProfiles();
     toast(`“${data.name.trim()}” is ready to play.`);
   } catch(error){
     for(const id of importedAssets){await deleteSound(id).catch(()=>{});assets.delete(id);engine.buffers.delete(id);engine.raw.delete(id);}
@@ -244,6 +322,14 @@ async function changeScope(scope) {
 }
 function stopCapture() {capturing=false;$('capture-key').classList.remove('capturing');$('capture-key').querySelector('span').textContent='Pick any key';}
 function setupEvents() {
+  $('new-audio-profile').addEventListener('click',openAudioProfile);
+  $('profile-audio-choose').addEventListener('click',()=>$('profile-audio-file').click());
+  $('profile-audio-file').addEventListener('change',event=>void loadProfileAudio(event.target.files[0]));
+  $('audio-profile-form').addEventListener('submit',event=>{event.preventDefault();void createAudioProfile();});
+  $('audio-profile-dialog').addEventListener('close',resetProfileAudio);
+  for(const name of ['dragenter','dragover'])$('profile-audio-choose').addEventListener(name,event=>{event.preventDefault();$('profile-audio-choose').classList.add('dragover');});
+  for(const name of ['dragleave','drop'])$('profile-audio-choose').addEventListener(name,event=>{event.preventDefault();$('profile-audio-choose').classList.remove('dragover');});
+  $('profile-audio-choose').addEventListener('drop',event=>void loadProfileAudio(event.dataTransfer.files[0]));
   $('mute-button').addEventListener('click',()=>{void engine.prepare().catch(audioError);setMuted(!settings.muted);});
   $('volume').addEventListener('input',event=>setVolume(event.target.value));
   $('volume').addEventListener('change',()=>void play(selectedKey,undefined,true));
@@ -272,6 +358,7 @@ function setupEvents() {
   document.addEventListener('keydown',event=>{
     if(capturing){event.preventDefault();event.stopPropagation();if(event.code!=='Escape'){selectKey(event.code);void play(event.code,undefined,true);}stopCapture();return;}
     if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.code==='KeyM'){event.preventDefault();if(!event.repeat)setMuted(!settings.muted);return;}
+    if($('audio-profile-dialog').open)return;
     if(!event.code || event.repeat || pressed.has(event.code))return;
     pressed.add(event.code);pressVisual(event.code);void play(event.code);
     if(event.target===$('editor') && !event.ctrlKey && !event.metaKey && (event.key.length===1||event.code==='Enter')){if(!sessionStart)sessionStart=Date.now();sessionKeys++;animateTyping();}
@@ -293,7 +380,7 @@ function setupEvents() {
   $('scope-app').addEventListener('click',()=>void changeScope('app'));
   $('scope-everywhere').addEventListener('click',()=>void changeScope('everywhere'));
   document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();$('editor').focus();});
-  desktop?.onKey(({code,down})=>{if(down){pressVisual(code);void play(code);}else releaseVisual(code);});
+  desktop?.onKey(({code,down})=>{if($('audio-profile-dialog').open)return;if(down){pressVisual(code);void play(code);}else releaseVisual(code);});
   desktop?.onMuted(muted=>setMuted(muted,false));
 }
 
@@ -305,9 +392,8 @@ async function initialize() {
   if(!desktop){$('desktop-label').textContent='DESKTOP FEATURE';settings.scope='app';}
   updateScopeUI();
   try {
-    for(const asset of await getSounds()){assets.set(asset.id,asset);engine.raw.set(asset.id,asset.data);}
-    // Decode uploads on the first gesture, then keep buffers in memory for immediate playback.
-    const prepareUploads=async()=>{try{await engine.prepare();await Promise.all([...assets.values()].map(asset=>engine.addUpload(asset.id,asset.data)));}catch(error){audioError(error);}};
+    // Load only the active profile's audio; other saved files stay on disk.
+    const prepareUploads=async()=>{try{await engine.prepare();const id=currentProfile().audioAssetId;if(id){const asset=await getAsset(id);if(asset)await engine.addUpload(id,asset.data);}}catch(error){audioError(error);}};
     window.addEventListener('pointerdown',()=>void prepareUploads(),{once:true,capture:true});
     window.addEventListener('keydown',()=>void prepareUploads(),{once:true,capture:true});
     if(desktop){await prepareUploads();if(settings.scope==='everywhere')await changeScope('everywhere');}

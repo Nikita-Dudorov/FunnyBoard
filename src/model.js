@@ -1,3 +1,5 @@
+import { MAX_PROFILE_AUDIO_BYTES, MAX_PROFILE_IMPORT_BYTES } from './profile-audio.js';
+
 export const PROFILES = [
   { id: 'wood', name: 'Wooden mechanical', short: 'Wooden', adjective: 'Warm. Tactile. A little nostalgic.', description: 'A satisfying wooden thock with a crisp mechanical finish.', tag: 'THE ORIGINAL', color: '#bb7849', sound: 'wood', icon: 'wood' },
   { id: 'creamy', name: 'Creamy switches', short: 'Creamy', adjective: 'Soft landings. Smooth thoughts.', description: 'A soft, rounded pop for your next long writing session.', tag: 'SOFT & MELLOW', color: '#b4aa8c', sound: 'creamy', icon: 'cream' },
@@ -23,23 +25,26 @@ export function keyName(code) {
 }
 
 export function profileFor(id, profiles = PROFILES) { return profiles.find(p=>p.id===id) || PROFILES[0]; }
-export function soundFor(code, profile, bindings) { return bindings[`${profile.id}:${code}`] || {type:'preset',sound:profile.sound}; }
+export function soundFor(code, profile, bindings) { return bindings[`${profile.id}:${code}`] || (profile.audioAssetId?{type:'flow',assetId:profile.audioAssetId,gain:profile.gain}:{type:'preset',sound:profile.sound}); }
 export function noteStats(text) { return {words: text.trim() ? text.trim().split(/\s+/u).length : 0, characters: text.length}; }
 export function validKeyCode(code) { return typeof code === 'string' && /^[A-Za-z][A-Za-z0-9]{0,39}$/.test(code); }
 export function validPreset(sound) { return PROFILES.some(p=>p.sound===sound); }
 
 export function validateProfile(data) {
-  if (!data || data.format!=='funnyboard-profile' || data.version!==1 || typeof data.name!=='string' || !data.name.trim() || data.name.length>60 || !validPreset(data.sound)) throw new Error('This is not a valid FunnyBoard profile.');
+  if (!data || data.format!=='funnyboard-profile' || ![1,2].includes(data.version) || typeof data.name!=='string' || !data.name.trim() || data.name.length>60) throw new Error('This is not a valid FunnyBoard profile.');
+  if(data.version===1&&!validPreset(data.sound))throw new Error('Unknown profile sound.');
+  const validAudio=(audio,maxBytes)=>audio&&typeof audio.name==='string'&&audio.name.length<=255&&typeof audio.data==='string'&&/^data:audio\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/.test(audio.data)&&audio.data.length<=Math.ceil(maxBytes/3)*4+100;
+  if(data.version===2&&(data.continuous!==true||!validAudio(data.audio,MAX_PROFILE_AUDIO_BYTES)))throw new Error('Invalid profile audio.');
   if (!data.bindings || typeof data.bindings!=='object' || Array.isArray(data.bindings) || Object.keys(data.bindings).length>300) throw new Error('Invalid key bindings.');
-  let bytes=0;
+  let bytes=data.version===2?data.audio.data.length:0;
   for(const [code,binding] of Object.entries(data.bindings)) {
     if(!validKeyCode(code) || !binding || !['preset','upload'].includes(binding.type)) throw new Error('Invalid key binding.');
     if(binding.type==='preset' && !validPreset(binding.sound)) throw new Error('Unknown sound in profile.');
     if(binding.type==='upload') {
-      if(typeof binding.data!=='string' || !/^data:audio\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/.test(binding.data) || typeof binding.name!=='string' || binding.name.length>255 || binding.data.length>7_000_000) throw new Error('Invalid audio in profile.');
+      if(!validAudio(binding,5*1024*1024)) throw new Error('Invalid audio in profile.');
       bytes+=binding.data.length;
     }
   }
-  if(bytes>40_000_000) throw new Error('This profile is too large (40 MB maximum).');
+  if(bytes>MAX_PROFILE_IMPORT_BYTES) throw new Error('This profile is too large (64 MB maximum).');
   return data;
 }

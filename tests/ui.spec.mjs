@@ -2,6 +2,68 @@ import {test,expect} from '@playwright/test';
 import path from 'node:path';
 import {readFile} from 'node:fs/promises';
 
+function audioFile({amplitude=.02,duration=4,sampleRate=8000,channels=2}={}){
+  const frames=Math.round(duration*sampleRate),buffer=Buffer.alloc(44+frames*channels*2);
+  buffer.write('RIFF',0);buffer.writeUInt32LE(buffer.length-8,4);buffer.write('WAVEfmt ',8);buffer.writeUInt32LE(16,16);buffer.writeUInt16LE(1,20);buffer.writeUInt16LE(channels,22);buffer.writeUInt32LE(sampleRate,24);buffer.writeUInt32LE(sampleRate*channels*2,28);buffer.writeUInt16LE(channels*2,32);buffer.writeUInt16LE(16,34);buffer.write('data',36);buffer.writeUInt32LE(buffer.length-44,40);
+  for(let frame=0;frame<frames;frame++)for(let channel=0;channel<channels;channel++)buffer.writeInt16LE(Math.round(32767*amplitude*Math.sin(2*Math.PI*(channel?620:440)*frame/sampleRate)),44+(frame*channels+channel)*2);
+  return buffer;
+}
+async function openAudioForm(page){await page.locator('#browse-profiles').click();await page.locator('#new-audio-profile').click();}
+async function createFromAudio(page,name,buffer){
+  await openAudioForm(page);await page.locator('#audio-profile-name').fill(name);
+  await page.locator('#profile-audio-file').setInputFiles({name:'audio.wav',mimeType:'audio/wav',buffer});
+  await expect(page.locator('#create-audio-profile-submit')).toBeEnabled();await page.locator('#create-audio-profile-submit').click();await expect(page.locator('#profile-name')).toHaveText(name);
+}
+
+test('one uploaded sample creates a normalized continuous profile and survives restart and cleanup',async({page})=>{
+  await page.addInitScript(()=>{
+    window.flowStarts=[];const original=AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start=function(...args){window.flowStarts.push({duration:this.buffer.duration,offset:args[1]||0,channels:this.buffer.numberOfChannels});return original.apply(this,args);};
+  });
+  await page.goto('/');await createFromAudio(page,'Quiet Ocean',audioFile());
+  const profile=await page.evaluate(()=>{const s=JSON.parse(localStorage.getItem('funnyboard.settings.v1'));return s.customProfiles.find(p=>p.id===s.profile);});
+  expect(profile.continuous).toBe(true);expect(profile.gain).toBeGreaterThan(1);
+  await page.locator('#editor').pressSequentially('abcd',{delay:100});
+  expect(await page.evaluate(()=>window.flowStarts.filter(s=>Math.abs(s.duration-4)<.001).length)).toBe(1);
+  await page.locator('#key-sound').selectOption('wood');await page.locator('#reset-key').click();
+  await page.reload();await expect(page.locator('#profile-name')).toHaveText('Quiet Ocean');
+  await page.locator('#editor').press('KeyA');await expect.poll(()=>page.evaluate(()=>window.flowStarts.some(s=>Math.abs(s.duration-4)<.001&&s.channels===2))).toBe(true);
+  const ids=await page.evaluate(async()=>{const store=await import('/store.js');return store.getSoundIds();});expect(ids).toContain(profile.audioAssetId);
+  await createFromAudio(page,'Loud Ocean',audioFile({amplitude:.8}));
+  const loud=await page.evaluate(()=>{const s=JSON.parse(localStorage.getItem('funnyboard.settings.v1'));return s.customProfiles.find(p=>p.id===s.profile);});
+  expect(loud.gain).toBeLessThan(1);expect(profile.gain/loud.gain).toBeCloseTo(40,0);
+});
+
+test('continuous profile export/import keeps the full file and recomputes loudness',async({page})=>{
+  const buffer=audioFile({amplitude:.01,duration:5});await page.goto('/');await createFromAudio(page,'My audio',buffer);
+  await page.locator('#key-sound').selectOption('arcade');await page.locator('#browse-profiles').click();
+  const promise=page.waitForEvent('download');await page.locator('#export-profile').click();const download=await promise;
+  const filename=await download.path();const data=JSON.parse(await readFile(filename,'utf8'));
+  expect(data.version).toBe(2);expect(Buffer.from(data.audio.data.split(',')[1],'base64').equals(buffer)).toBe(true);
+  const initial=await page.evaluate(()=>{const s=JSON.parse(localStorage.getItem('funnyboard.settings.v1'));return s.customProfiles.find(p=>p.id===s.profile);});
+  await page.locator('#profile-file').setInputFiles(filename);
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('funnyboard.settings.v1')).customProfiles.length)).toBe(2);
+  const imported=await page.evaluate(()=>{const s=JSON.parse(localStorage.getItem('funnyboard.settings.v1'));return s.customProfiles.find(p=>p.id===s.profile);});
+  expect(imported.audioAssetId).not.toBe(initial.audioAssetId);expect(imported.gain).toBeCloseTo(initial.gain,5);
+  await page.locator('#profiles-dialog .close-dialog').click();await expect(page.locator('#key-sound')).toHaveValue('arcade');
+  await page.reload();await expect(page.locator('#profile-name')).toHaveText('My audio');
+});
+
+test('invalid and canceled profile uploads leave no saved profiles or audio',async({page})=>{
+  await page.goto('/');await openAudioForm(page);
+  await page.locator('#profile-audio-file').setInputFiles({name:'broken.wav',mimeType:'audio/wav',buffer:Buffer.from('invalid')});
+  await expect(page.locator('#profile-audio-error')).toBeVisible();await expect(page.locator('#create-audio-profile-submit')).toBeDisabled();
+  await page.locator('#profile-audio-file').setInputFiles({name:'silent.wav',mimeType:'audio/wav',buffer:audioFile({amplitude:0})});
+  await expect(page.locator('#profile-audio-error')).toContainText('silent');
+  await page.locator('#profile-audio-file').setInputFiles({name:'too-long.wav',mimeType:'audio/wav',buffer:audioFile({duration:301,channels:1})});
+  await expect(page.locator('#profile-audio-error')).toContainText('5 minutes');
+  await page.locator('#profile-audio-file').setInputFiles({name:'valid.wav',mimeType:'audio/wav',buffer:audioFile()});
+  await expect(page.locator('#create-audio-profile-submit')).toBeEnabled();
+  await page.locator('#audio-profile-dialog .close-dialog').click();
+  const stored=await page.evaluate(async()=>{const store=await import('/store.js');return{ids:await store.getSoundIds(),profiles:JSON.parse(localStorage.getItem('funnyboard.settings.v1')).customProfiles};});
+  expect(stored.ids).toEqual([]);expect(stored.profiles).toEqual([]);
+});
+
 test('Durka keeps one continuous stream while typing, pauses and resumes its cursor',async({page})=>{
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.addInitScript(()=>{
@@ -100,4 +162,9 @@ test('mobile layout fits the viewport and dialogs remain usable',async({page})=>
   await page.locator('#profile-picker').click();await expect(page.locator('#profiles-dialog')).toBeVisible();
   expect(await page.locator('#profiles-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
   await page.screenshot({path:'/tmp/funnyboard-mobile.png',fullPage:true});
+  await page.locator('#new-audio-profile').click();
+  await page.locator('#profile-audio-file').setInputFiles({name:'My long audio filename for a new profile.wav',mimeType:'audio/wav',buffer:audioFile()});
+  await expect(page.locator('#create-audio-profile-submit')).toBeEnabled();
+  expect(await page.locator('#audio-profile-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+  await page.screenshot({path:'/tmp/funnyboard-audio-profile-mobile.png',fullPage:true});
 });

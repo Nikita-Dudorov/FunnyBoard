@@ -36,5 +36,7 @@ async function transact(mode,operation) {
   });
 }
 export const getSounds=()=>transact('readonly',store=>store.getAll());
+export const getSound=id=>transact('readonly',store=>store.get(id));
+export const getSoundIds=()=>transact('readonly',store=>store.getAllKeys());
 export const putSound=sound=>transact('readwrite',store=>store.put(sound));
 export const deleteSound=id=>transact('readwrite',store=>store.delete(id));

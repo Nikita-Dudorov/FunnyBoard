@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {readFile} from 'node:fs/promises';
 import {PROFILES,KEY_ROWS,keyName,profileFor,soundFor,noteStats,validateProfile} from '../src/model.js';
+import {profileVolumeGain} from '../src/profile-audio.js';
 const require=createRequire(import.meta.url);
 const {createKeyMap,toDomCode}=require('../desktop/keymap.cjs');
 
@@ -12,6 +13,28 @@ test('bindings are scoped to the selected profile, and fall back to its sound',(
   assert.equal(soundFor('KeyB',PROFILES[0],bindings).sound,'wood');
   assert.equal(soundFor('KeyA',PROFILES[1],bindings).sound,'creamy');
   assert.equal(profileFor('missing').id,'wood');
+  assert.deepEqual(soundFor('KeyA',{id:'mine',audioAssetId:'audio-1',gain:2},{}),{type:'flow',assetId:'audio-1',gain:2});
+});
+test('automatic volume matching balances quiet and loud audio without changing it',()=>{
+  const buffer=(amplitude,duration=1,channels=2)=>{
+    const sampleRate=8000,length=Math.round(sampleRate*duration);
+    const data=Array.from({length:channels},(_,channel)=>Float32Array.from({length},(_,i)=>amplitude*Math.sin(i/sampleRate*2*Math.PI*(channel?620:440))));
+    return{sampleRate,length,duration,numberOfChannels:channels,getChannelData:index=>data[index]};
+  };
+  const references=[.03,.04,.05,.06,.07].map(amplitude=>buffer(amplitude,.15,1));
+  const quiet=buffer(.0005),loud=buffer(.8),before=quiet.getChannelData(0).slice();
+  const quietGain=profileVolumeGain(quiet,references),loudGain=profileVolumeGain(loud,references);
+  assert.ok(quietGain>32,'Very quiet audio is amplified sufficiently');assert.ok(loudGain<1,'Loud audio is reduced');
+  assert.ok(Math.abs(.0005*quietGain-.8*loudGain)<1e-6,'Final loudness is comparable');
+  assert.ok(.8*loudGain<=.708);assert.deepEqual(quiet.getChannelData(0),before);
+  assert.throws(()=>profileVolumeGain(buffer(0),references),/silent/);
+  assert.throws(()=>profileVolumeGain({...quiet,duration:301},references),/5 minutes/);
+  assert.throws(()=>profileVolumeGain(buffer(.1,1,3),references),/mono or stereo/);
+});
+test('continuous profile backups validate audio and still accept legacy profiles',()=>{
+  const data={format:'funnyboard-profile',version:2,name:'Ocean',continuous:true,audio:{name:'ocean.wav',data:'data:audio/wav;base64,YWJjZA=='},bindings:{Space:{type:'preset',sound:'wood'}}};
+  assert.equal(validateProfile(data).name,'Ocean');
+  for(const changed of [{...data,version:3},{...data,continuous:false},{...data,audio:null},{...data,audio:{...data.audio,data:'data:text/html;base64,YWJjZA=='}}])assert.throws(()=>validateProfile(changed));
 });
 test('keyboard supports unique physical positions including modifier sides',()=>{
   const keys=KEY_ROWS.flat().map(([code])=>code);
