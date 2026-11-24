@@ -3,7 +3,8 @@ export const PROFILES = [
   { id: 'creamy', name: 'Creamy switches', short: 'Creamy', adjective: 'Soft landings. Smooth thoughts.', description: 'A soft, rounded pop for your next long writing session.', tag: 'SOFT & MELLOW', color: '#b4aa8c', sound: 'creamy', icon: 'cream' },
   { id: 'typewriter', name: 'Vintage typewriter', short: 'Typewriter', adjective: 'For words with a little history.', description: 'Crisp metal clacks, with a little bell on Enter.', tag: 'OLD SOUL', color: '#7e8e7b', sound: 'typewriter', icon: 'typewriter' },
   { id: 'arcade', name: 'Pocket arcade', short: 'Arcade', adjective: 'Small keys. High scores.', description: 'Playful electronic blips that turn typing into a game.', tag: 'JUST FOR FUN', color: '#ac8fa8', sound: 'arcade', icon: 'arcade' },
-  { id: 'bubble', name: 'Bubble pop', short: 'Bubbles', adjective: 'One tiny pop at a time.', description: 'Light, bubbly little pops. Oddly hard to stop typing.', tag: 'LIGHT & PLAYFUL', color: '#89a9ae', sound: 'bubble', icon: 'bubble' }
+  { id: 'bubble', name: 'Bubble pop', short: 'Bubbles', adjective: 'One tiny pop at a time.', description: 'Light, bubbly little pops. Oddly hard to stop typing.', tag: 'LIGHT & PLAYFUL', color: '#89a9ae', sound: 'bubble', icon: 'bubble' },
+  { id: 'durka', name: 'Durka', short: 'Durka', adjective: 'Find your flow.', description: 'A smooth, playful sound that flows with your typing.', tag: 'SMOOTH & PLAYFUL', color: '#8c7c9a', sound: 'durka', icon: 'durka', continuous: true }
 ];
 
 export const KEY_ROWS = [

@@ -1,5 +1,42 @@
 import {test,expect} from '@playwright/test';
 import path from 'node:path';
+import {readFile} from 'node:fs/promises';
+
+test('Durka keeps one continuous stream while typing, pauses and resumes its cursor',async({page})=>{
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.addInitScript(()=>{
+    window.durkaStarts=[];window.durkaActive=0;
+    const original=AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start=function(...args){
+      window.durkaStarts.push({duration:this.buffer.duration,channels:this.buffer.numberOfChannels,offset:args[1]||0,rate:this.playbackRate.value});
+      window.durkaActive++;this.addEventListener('ended',()=>window.durkaActive--);
+      return original.apply(this,args);
+    };
+  });
+  await page.goto('/');await page.locator('#browse-profiles').click();
+  await page.getByRole('button',{name:'Use Durka profile',exact:true}).click();
+  await expect(page.locator('#profile-name')).toHaveText('Durka');
+  await page.locator('#editor').pressSequentially('abcdefghij',{delay:100});
+  await page.locator('#editor').press('Space');await page.locator('#editor').press('Enter');
+  const wav=await readFile(path.resolve('src/assets/sounds/durka-flow.wav'));
+  const duration=(wav.length-44)/(wav.readUInt32LE(24)*wav.readUInt16LE(22)*2);
+  const starts=await page.evaluate(()=>window.durkaStarts);
+  expect(starts).toHaveLength(1);expect(starts[0].duration).toBeCloseTo(duration,3);
+  expect(starts[0].channels).toBe(2);expect(starts[0].rate).toBe(1);
+  await expect.poll(()=>page.evaluate(()=>window.durkaActive)).toBe(0);
+  await page.locator('#editor').press('KeyA');
+  await expect.poll(()=>page.evaluate(()=>window.durkaStarts.length)).toBe(2);
+  expect(await page.evaluate(()=>window.durkaStarts[1].offset)).toBeGreaterThan(0.5);
+  await page.locator('#mute-button').click();
+  await expect.poll(()=>page.evaluate(()=>window.durkaActive)).toBe(0);
+  await page.locator('#mute-button').click();
+  await page.locator('#key-sound').selectOption('wood');
+  await expect(page.locator('#binding-type')).toHaveText('Custom sound');
+  await expect.poll(()=>page.evaluate(()=>window.durkaActive)).toBe(0);
+  await page.reload();await expect(page.locator('#profile-name')).toHaveText('Durka');
+  await page.locator('#key-sound').selectOption('durka');await expect(page.locator('#binding-type')).toHaveText('Custom sound');
+  expect(errors).toEqual([]);
+});
 
 test('typing plays decoded wooden sounds; note, volume and mute persist',async({page})=>{
   const errors=[];page.on('pageerror',error=>errors.push(error.message));

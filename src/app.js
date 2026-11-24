@@ -278,7 +278,7 @@ function setupEvents() {
     if(event.target===$('editor')&&event.code==='Tab'){event.preventDefault();const editor=$('editor');editor.setRangeText('  ',editor.selectionStart,editor.selectionEnd,'end');editor.dispatchEvent(new Event('input',{bubbles:true}));}
   });
   document.addEventListener('keyup',event=>{pressed.delete(event.code);releaseVisual(event.code);});
-  window.addEventListener('blur',()=>{pressed.clear();for(const [code] of keyElements)releaseVisual(code);stopCapture();saveCurrentNote();});
+  window.addEventListener('blur',()=>{pressed.clear();for(const [code] of keyElements)releaseVisual(code);if(settings.scope==='app')engine.stopFlow();stopCapture();saveCurrentNote();});
   $('editor').addEventListener('input',()=>{updateStats();$('saved-status').lastChild.textContent=' Saving…';clearTimeout(saveTimer);saveTimer=setTimeout(saveCurrentNote,200);});
   window.addEventListener('beforeunload',saveCurrentNote);
   $('export-note').addEventListener('click',exportNote);

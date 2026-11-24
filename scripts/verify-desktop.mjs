@@ -3,6 +3,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
+import {PROFILES} from '../src/model.js';
 
 const userData=await mkdtemp(path.join(tmpdir(),'funnyboard-qa-'));
 const executable=process.env.FUNNYBOARD_EXECUTABLE;
@@ -16,9 +17,15 @@ try {
   const page=await application.firstWindow();await page.waitForLoadState('domcontentloaded');
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await expect(page.locator('#profile-name')).toHaveText('Wooden mechanical');
+  if(process.env.FUNNYBOARD_QA_PROFILE){
+    await page.locator('#browse-profiles').click();
+    await page.getByRole('button',{name:`Use ${process.env.FUNNYBOARD_QA_PROFILE} profile`,exact:true}).click();
+    await expect(page.locator('#profile-name')).toHaveText(process.env.FUNNYBOARD_QA_PROFILE);
+  }
   await page.screenshot({path:'/tmp/funnyboard-desktop.png',fullPage:true});
   await page.locator('#editor').pressSequentially('A little more joy in every keystroke.',{delay:30});
   await expect(page.locator('#word-count')).toHaveText('7');
+  await page.locator('#mute-button').click();await page.locator('#mute-button').click();
   await page.evaluate(()=>{
     window.globalKeys=[];window.sourcesPlayed=0;
     window.funnyboard.onKey(key=>window.globalKeys.push(key));
@@ -40,14 +47,19 @@ try {
     if(!target?.isFocused())throw new Error('Test window must be focused before key injection.');
   });
   execFileSync('python3',[path.resolve('scripts/test-x11-keys.py')]);
-  await expect.poll(()=>page.evaluate(()=>window.globalKeys.filter(key=>key.down).length)).toBe(2);
-  await expect.poll(()=>page.evaluate(()=>window.sourcesPlayed)).toBe(2);
+  // Other physical keys may arrive from an active desktop during this check.
+  await expect.poll(()=>page.evaluate(()=>['KeyA','Space'].every(code=>window.globalKeys.some(key=>key.down&&key.code===code)))).toBe(true);
+  const continuous=PROFILES.find(profile=>profile.name===process.env.FUNNYBOARD_QA_PROFILE)?.continuous;
+  await expect.poll(()=>page.evaluate(()=>window.sourcesPlayed)).toBeGreaterThanOrEqual(continuous?1:2);
   await expect(page.locator('#editor')).toHaveValue('A little more joy in every keystroke.');
   // Muting must also suppress sounds from background key events.
   await page.evaluate(()=>document.getElementById('mute-button').click());
+  await page.waitForTimeout(30);
+  const mutedSources=await page.evaluate(()=>window.sourcesPlayed);
+  const mutedKeys=await page.evaluate(()=>window.globalKeys.filter(key=>key.down).length);
   execFileSync('python3',[path.resolve('scripts/test-x11-keys.py')]);
-  await expect.poll(()=>page.evaluate(()=>window.globalKeys.filter(key=>key.down).length)).toBe(4);
-  expect(await page.evaluate(()=>window.sourcesPlayed)).toBe(2);
+  await expect.poll(()=>page.evaluate(()=>window.globalKeys.filter(key=>key.down).length)).toBeGreaterThanOrEqual(mutedKeys+2);
+  expect(await page.evaluate(()=>window.sourcesPlayed)).toBe(mutedSources);
   await page.evaluate(()=>document.getElementById('mute-button').click());
   // Keep the auxiliary window until app shutdown; focus the app by its trusted URL.
   await application.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith('funnyboard://app/'));w.show();w.focus();});
