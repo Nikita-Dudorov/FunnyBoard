@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob: data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="theme-color" content="#f6f4ef">
+  <meta name="description" content="A little more joy in every keystroke. Write, pick a sound profile, and make every key your own.">
+  <title>FunnyBoard — Make some noise.</title>
+  <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <svg class="svg-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <symbol id="i-volume" viewBox="0 0 24 24"><path d="m11 5-6 4H2v6h3l6 4V5Zm4 3a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></symbol>
+      <symbol id="i-mute" viewBox="0 0 24 24"><path d="m11 5-6 4H2v6h3l6 4V5Zm5 4 6 6m0-6-6 6"/></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/></symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m-4 4 4-4 4 4M4 15v6h16v-6"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="m9 5 11 7-11 7V5Z"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+      <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 11a9 9 0 1 1 2 7M3 4v7h7"/></symbol>
+      <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 1 1 5 2c-2 1-2 2-2 3m0 3h.01"/></symbol>
+      <symbol id="i-key" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="4"/><path d="M8 9v6h8V9H8Z"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    </defs>
+  </svg>
+
+  <header class="app-header">
+    <a class="brand" href="#" aria-label="FunnyBoard home"><img src="./assets/icon.svg" alt="" width="39" height="39"><span>FunnyBoard<span class="brand-period">.</span></span></a>
+    <span class="brand-tagline">a little more joy in every keystroke</span>
+    <div class="header-actions">
+      <button class="sound-toggle" id="mute-button" aria-pressed="false" title="Toggle sounds (Ctrl/Cmd + Shift + M)"><svg class="icon"><use href="#i-volume"/></svg><span id="mute-label">Sound is on</span><span class="toggle-track"><span></span></span></button>
+      <span class="header-divider"></span>
+      <button class="icon-button" id="help-button" aria-label="How to use FunnyBoard"><svg class="icon"><use href="#i-help"/></svg></button>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <section class="page-heading">
+      <div><p class="eyebrow"><span class="tiny-spark">✳</span> A GOOD DAY TO PUT WORDS DOWN</p><h1>Make some noise<span>.</span></h1><p class="intro">Your thoughts. Your keyboard. Your kind of sound.</p></div>
+      <div class="rhythm-mark" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><small>find your rhythm</small></div>
+    </section>
+
+    <div class="workspace">
+      <div class="writing-column">
+        <section class="editor-card" aria-label="Writing space">
+          <div class="editor-toolbar"><div class="note-title"><span class="note-dot"></span><span>My little writing space</span></div><div class="editor-actions"><span class="saved-status" id="saved-status"><svg class="icon"><use href="#i-check"/></svg> Saved on this device</span><button class="icon-button small" id="export-note" aria-label="Save note as text file" title="Save note as .txt"><svg class="icon"><use href="#i-download"/></svg></button><button class="text-button subtle" id="clear-note">Clear</button></div></div>
+          <label class="visually-hidden" for="editor">Your text</label>
+          <textarea id="editor" placeholder="Every good idea starts with a keystroke.&#10;&#10;Go on, make yourself heard…" spellcheck="true" autofocus></textarea>
+          <div class="editor-footer"><span class="typing-prompt" id="typing-prompt"><span class="live-dot"></span> Ready when you are</span><div class="note-stats"><span><strong id="word-count">0</strong> words</span><span><strong id="char-count">0</strong> characters</span><span class="wpm-stat"><strong id="wpm-count">0</strong> wpm</span></div></div>
+        </section>
+
+        <section class="keyboard-section" aria-label="Keyboard sound bindings">
+          <div class="section-heading"><div><h2>Your keyboard, your rules</h2><p>Click a key to give it a sound of its own.</p></div><button class="text-button pick-key-button" id="capture-key"><svg class="icon"><use href="#i-key"/></svg><span>Pick any key</span></button></div>
+          <div class="keyboard-shell"><div class="keyboard" id="keyboard"></div><div class="keyboard-brand"><span>FUNNYBOARD</span><span><i></i> <span id="keyboard-profile-label">WOODEN MECHANICAL</span></span></div></div>
+          <div class="keyboard-caption"><span><i class="binding-dot"></i> <span id="binding-count">0 custom bindings</span></span><span>Made for the way you type <span class="mini-heart">♡</span></span></div>
+        </section>
+      </div>
+
+      <aside class="sound-sidebar" aria-label="Sound settings">
+        <section class="profile-section"><div class="sidebar-heading"><h2>Set the mood</h2><span class="label-tag">01</span></div>
+          <button id="profile-picker" class="active-profile" aria-haspopup="dialog"><div class="profile-art wood" id="active-profile-art" aria-hidden="true"><div class="art-key key-one">F</div><div class="art-key key-two">B</div><div class="art-spark">✳</div><span class="art-caption">the sound of a good idea</span></div><div class="profile-info"><span class="profile-small-label" id="profile-tag">THE ORIGINAL</span><div class="profile-name-row"><strong id="profile-name">Wooden mechanical</strong><svg class="icon"><use href="#i-chevron"/></svg></div><span id="profile-adjective">Warm. Tactile. A little nostalgic.</span></div></button>
+          <div class="profile-action-row"><button class="text-button" id="preview-profile"><svg class="icon"><use href="#i-play"/></svg> Give it a listen</button><button class="text-button accent" id="browse-profiles">All profiles <svg class="icon"><use href="#i-arrow"/></svg></button></div>
+          <div class="volume-control"><div class="control-label"><label for="volume">Volume</label><output id="volume-value" for="volume">65%</output></div><div class="range-row"><svg class="icon"><use href="#i-volume"/></svg><input type="range" id="volume" min="0" max="100" value="65" aria-label="Sound volume"></div></div>
+        </section>
+
+        <section class="binding-section"><div class="sidebar-heading"><h2>Make it personal</h2><span class="label-tag">02</span></div><div class="selected-key-row"><div class="selected-keycap" id="selected-keycap">A</div><div><span class="small-label">SELECTED KEY</span><strong id="selected-key-name">A</strong></div><button class="icon-button small" id="preview-key" aria-label="Preview selected key sound" title="Preview key sound"><svg class="icon"><use href="#i-play"/></svg></button></div>
+          <label class="control-label" for="key-sound">Key sound <span id="binding-type">Profile default</span></label><select id="key-sound"><option value="default">Use profile sound</option><option value="wood">Wooden mechanical</option><option value="creamy">Creamy switches</option><option value="typewriter">Vintage typewriter</option><option value="arcade">Pocket arcade</option><option value="bubble">Bubble pop</option></select>
+          <button class="upload-zone" id="upload-zone"><svg class="icon"><use href="#i-upload"/></svg><span id="upload-label">Drop a sound or <strong>browse files</strong></span><small>WAV, MP3, OGG, M4A · ≤ 3 s · 5 MB</small></button><input id="audio-file" type="file" accept="audio/*,.wav,.mp3,.ogg,.m4a,.flac,.aac,.webm" hidden>
+          <div class="binding-footer"><span id="binding-filename">A little personality goes a long way.</span><button class="text-button" id="reset-key" hidden title="Use the profile’s default sound"><svg class="icon"><use href="#i-reset"/></svg> Reset</button></div>
+        </section>
+
+        <section class="scope-section"><div class="control-label">Play sounds<span id="desktop-label">DESKTOP APP</span></div><div class="segmented-control" aria-label="Where to play sounds"><button id="scope-app" class="selected" aria-pressed="true">FunnyBoard only</button><button id="scope-everywhere" aria-pressed="false">Everywhere</button></div><p id="scope-description">A soundtrack for this little writing space.</p></section>
+      </aside>
+    </div>
+    <footer class="app-footer"><span><span class="offline-dot"></span> Offline. On your device. All yours.</span><span>Type something that sounds like you.</span><span class="version">v1.0</span></footer>
+  </main>
+
+  <dialog id="profiles-dialog" class="profiles-dialog"><div class="dialog-top"><div><p class="eyebrow">A SOUND FOR EVERY MOOD</p><h2>Find your signature sound<span>.</span></h2><p>Pick a personality for your keyboard.</p></div><button class="icon-button close-dialog" aria-label="Close profiles"><svg class="icon"><use href="#i-close"/></svg></button></div><div class="profile-grid" id="profile-grid"></div><div class="profile-dialog-footer"><button class="text-button" id="import-profile"><svg class="icon"><use href="#i-upload"/></svg> Import profile</button><button class="text-button" id="export-profile"><svg class="icon"><use href="#i-download"/></svg> Export current profile</button><button class="button primary" id="save-profile"><svg class="icon"><use href="#i-plus"/></svg> Save as new profile</button></div><input id="profile-file" type="file" accept="application/json,.json" hidden></dialog>
+  <dialog id="help-dialog" class="small-dialog"><div class="dialog-top"><h2>A few good keys.</h2><button class="icon-button close-dialog" aria-label="Close help"><svg class="icon"><use href="#i-close"/></svg></button></div><div class="help-content"><p>Just start typing. Your wooden mechanical sounds are ready to go.</p><ol><li><strong>Find your sound.</strong> Open the profile menu to try five different moods.</li><li><strong>Make a key your own.</strong> Click a key below your note, then choose a sound or upload an audio file. Use “Pick any key” for keys outside the visual keyboard.</li><li><strong>Take it everywhere.</strong> In the desktop app, switch to Everywhere to hear sounds in other apps, even when FunnyBoard is minimized. Close the window to keep it in your tray. Use the tray menu to mute or quit.</li><li><strong>Keep what you make.</strong> Notes and bindings save on this device. Download your note as a text file, or export a profile with its audio to back it up.</li></ol><p class="shortcut-hint"><kbd>Ctrl / ⌘</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd> toggles sound</p><p class="help-note">Everywhere uses physical key positions. It never records what you type in other apps. macOS requires Accessibility access; Linux requires an X11 session.</p></div></dialog>
+  <dialog id="confirm-dialog" class="small-dialog"><div class="dialog-top"><h2>A fresh page?</h2><button class="icon-button close-dialog" aria-label="Cancel"><svg class="icon"><use href="#i-close"/></svg></button></div><p>This clears the note on this device. Save a copy first if you’d like to keep it.</p><div class="dialog-buttons"><button class="button" id="cancel-clear">Keep writing</button><button class="button primary" id="confirm-clear">Clear note</button></div></dialog>
+  <dialog id="name-dialog" class="small-dialog"><div class="dialog-top"><h2>Give your sound a name.</h2><button class="icon-button close-dialog" aria-label="Cancel"><svg class="icon"><use href="#i-close"/></svg></button></div><form id="profile-name-form"><label for="new-profile-name">Profile name</label><input id="new-profile-name" maxlength="60" placeholder="My perfect keyboard" required><p>Your current sounds and key bindings will be copied into this profile.</p><div class="dialog-buttons"><button type="submit" class="button primary">Save profile</button></div></form></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

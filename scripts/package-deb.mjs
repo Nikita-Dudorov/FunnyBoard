@@ -1,0 +1,27 @@
+// A small Debian package wrapper. Debian does not require a public homepage.
+import {cp,mkdir,readFile,writeFile,chmod,rm,access} from 'node:fs/promises';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+const root=fileURLToPath(new URL('../',import.meta.url));
+const pkg=JSON.parse(await readFile(path.join(root,'package.json'),'utf8'));
+const output=path.join(root,'release');
+const staging=path.join(output,'deb-staging');
+await access(path.join(output,'linux-unpacked/funnyboard'));
+await rm(staging,{recursive:true,force:true});
+const appFolder=path.join(staging,'opt/FunnyBoard');
+await mkdir(path.join(staging,'DEBIAN'),{recursive:true});
+await cp(path.join(output,'linux-unpacked'),appFolder,{recursive:true});
+await chmod(path.join(appFolder,'chrome-sandbox'),0o4755);
+await mkdir(path.join(staging,'usr/share/applications'),{recursive:true});
+await mkdir(path.join(staging,'usr/share/icons/hicolor/512x512/apps'),{recursive:true});
+await cp(path.join(root,'src/assets/icon.png'),path.join(staging,'usr/share/icons/hicolor/512x512/apps/funnyboard.png'));
+await writeFile(path.join(staging,'usr/share/applications/funnyboard.desktop'),`[Desktop Entry]\nName=FunnyBoard\nComment=Custom sounds for every keystroke\nExec=/opt/FunnyBoard/funnyboard %U\nTerminal=false\nType=Application\nIcon=funnyboard\nCategories=Utility;TextEditor;\nStartupWMClass=funnyboard\n`);
+await writeFile(path.join(staging,'DEBIAN/control'),`Package: funnyboard\nVersion: ${pkg.version}\nSection: utils\nPriority: optional\nArchitecture: amd64\nMaintainer: FunnyBoard\nDepends: libgtk-3-0, libnss3, libasound2 | libasound2t64, libxtst6, libx11-6, libxkbcommon0, libgbm1, libnotify4, libsecret-1-0, libxss1, libatk-bridge2.0-0, libdrm2\nDescription: Custom sounds for every keystroke\n A local writing space with per-key audio, sound profiles,\n and optional system-wide keyboard sounds.\n`);
+await writeFile(path.join(staging,'DEBIAN/postinst'),'#!/bin/sh\nset -e\nif command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q || true; fi\nif command -v gtk-update-icon-cache >/dev/null 2>&1; then gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true; fi\n');
+await chmod(path.join(staging,'DEBIAN/postinst'),0o755);
+const archive=path.join(output,`funnyboard_${pkg.version}_amd64.deb`);
+const result=spawnSync('dpkg-deb',['--root-owner-group','-Zgzip','-z6','--build',staging,archive],{stdio:'inherit'});
+if(result.status!==0)throw new Error('Debian packaging failed. Install dpkg-deb and try again.');
+await rm(staging,{recursive:true,force:true});
+console.log(`Debian installer ready: ${archive}`);

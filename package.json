@@ -1,0 +1,60 @@
+{
+  "name": "funnyboard",
+  "productName": "FunnyBoard",
+  "desktopName": "funnyboard.desktop",
+  "private": true,
+  "version": "1.0.0",
+  "description": "A little more joy in every keystroke. Custom keyboard sounds and a quiet place to write.",
+  "main": "desktop/main.cjs",
+  "author": "FunnyBoard",
+  "license": "MIT",
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "postinstall": "install-electron",
+    "start": "electron .",
+    "dev": "electron .",
+    "preview": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:ui": "playwright test",
+    "test:desktop": "node scripts/verify-desktop.mjs",
+    "check": "node --check src/app.js && node --check src/audio.js && node --check src/store.js && node --check desktop/main.cjs && node --check desktop/preload.cjs",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --publish never",
+    "dist:linux": "electron-builder --linux AppImage --publish never && node scripts/package-deb.mjs",
+    "dist:win": "electron-builder --win nsis --publish never",
+    "dist:mac": "electron-builder --mac dmg --publish never"
+  },
+  "dependencies": {
+    "uiohook-napi": "^1.5.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "overrides": { "minimatch@>=7.0.0 <11.0.1": "^11.0.9" },
+  "build": {
+    "appId": "app.funnyboard.desktop",
+    "productName": "FunnyBoard",
+    "directories": { "output": "release" },
+    "files": ["src/**/*", "desktop/**/*", "package.json"],
+    "asarUnpack": ["**/*.node"],
+    "npmRebuild": false,
+    "linux": {
+      "target": ["AppImage"],
+      "syncDesktopName": true,
+      "category": "Utility",
+      "icon": "src/assets/icon.png",
+      "maintainer": "FunnyBoard",
+      "synopsis": "Custom sounds for every keystroke"
+    },
+    "win": { "target": "nsis", "icon": "src/assets/icon.png" },
+    "nsis": { "oneClick": true, "perMachine": false, "createDesktopShortcut": true },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity",
+      "icon": "src/assets/icon.png",
+      "extendInfo": { "NSInputMonitoringUsageDescription": "FunnyBoard listens for key positions to play your chosen sounds when Everywhere mode is enabled. Typed text is never recorded." }
+    }
+  }
+}
