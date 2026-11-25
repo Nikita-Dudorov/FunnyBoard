@@ -3,7 +3,7 @@
   "productName": "FunnyBoard",
   "desktopName": "funnyboard.desktop",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A little more joy in every keystroke. Custom keyboard sounds and a quiet place to write.",
   "main": "desktop/main.cjs",
   "author": "FunnyBoard",

@@ -1,19 +1,19 @@
-import { PROFILES, KEY_ROWS, keyName, profileFor, soundFor, noteStats, validKeyCode, validateProfile } from './model.js';
+import { PROFILES, KEY_ROWS, keyName, profileFor, soundFor, noteStats, validKeyCode, validateProfile, withProfileColors } from './model.js';
 import { SoundEngine } from './audio.js';
 import { readSettings, saveSettings, readNote, saveNote, getSound, getSoundIds, putSound, deleteSound } from './store.js';
-import { audioFileMime, MAX_PROFILE_AUDIO_BYTES, MAX_PROFILE_AUDIO_SECONDS, MAX_PROFILE_IMPORT_BYTES } from './profile-audio.js';
+import { audioFileMime, profileNameFromFile, audioDurationLabel, audioTimeLabel, MAX_PROFILE_AUDIO_BYTES, MAX_PROFILE_AUDIO_SECONDS, MAX_PROFILE_IMPORT_BYTES } from './profile-audio.js';
 
 const $=id=>document.getElementById(id);
 const settings=readSettings();
 const desktop=window.funnyboard;
 const assets=new Map();
 const engine=new SoundEngine({loadUpload:async id=>(await getAsset(id))?.data});
-let pendingProfileAudio=null,profileAudioURL=null,profileAudioRequest=0;
+let pendingProfileAudio=null,pendingProfileCrop=null,profileAudioURL=null,profileAudioRequest=0,automaticProfileName='';
 let selectedKey='KeyA', capturing=false, toastTimer, saveTimer, rhythmTimer, sessionStart=0, sessionKeys=0, previewToken=0;
 let storageWarning=false, soundWarning=false;
 const keyElements=new Map();
 const pressed=new Set();
-const allProfiles=()=>[...PROFILES,...settings.customProfiles];
+const allProfiles=()=>withProfileColors([...PROFILES,...settings.customProfiles]);
 const currentProfile=()=>profileFor(settings.profile,allProfiles());
 const currentBinding=code=>soundFor(code,currentProfile(),settings.bindings);
 async function getAsset(id){if(!assets.has(id)){const asset=await getSound(id);if(asset)assets.set(id,asset);}return assets.get(id);}
@@ -85,7 +85,8 @@ function updateBindingUI() {
 function updateProfileUI() {
   const profile=currentProfile();
   $('profile-name').textContent=profile.name;$('profile-tag').textContent=profile.tag;
-  $('profile-adjective').textContent=profile.adjective;$('active-profile-art').className=`profile-art ${profile.icon}`;
+  $('profile-adjective').textContent=profile.adjective;styleProfileArt($('active-profile-art'),profile);
+  $('profile-picker').style.setProperty('--profile-color',profile.color);
   $('keyboard-profile-label').textContent=profile.name.toUpperCase();
   updateBindingUI();
 }
@@ -95,15 +96,24 @@ async function selectProfile(id) {
   toast(`${currentProfile().name}. Make yourself heard.`);
   void play('KeyA',undefined,true);
 }
+function mixColor(color,target,amount){
+  const rgb=[1,3,5].map(index=>Math.round(parseInt(color.slice(index,index+2),16)*(1-amount)+parseInt(target.slice(index,index+2),16)*amount));
+  return '#'+rgb.map(value=>value.toString(16).padStart(2,'0')).join('');
+}
+function styleProfileArt(art,profile){
+  art.className=`profile-art ${profile.icon}`;art.dataset.profileColor=profile.color;
+  const colors={'--art':profile.color,'--art-light':mixColor(profile.color,'#ffffff',.42),'--art-dark':mixColor(profile.color,'#363730',.38),'--art-background':mixColor(profile.color,'#f6f4ef',.76),'--art-ink':mixColor(profile.color,'#363730',.65),'--art-detail':mixColor(profile.color,'#363730',.35)};
+  for(const [name,value]of Object.entries(colors))art.style.setProperty(name,value);
+}
 function makeArt(profile) {
-  const art=document.createElement('div');art.className=`profile-art ${profile.icon}`;art.setAttribute('aria-hidden','true');
+  const art=document.createElement('div');styleProfileArt(art,profile);art.setAttribute('aria-hidden','true');
   for(const [classes,text] of [['art-key key-one','F'],['art-key key-two','B'],['art-spark','✳'],['art-caption','the sound of a good idea']]) {const item=document.createElement('span');item.className=classes;item.textContent=text;art.append(item);}
   return art;
 }
 function renderProfiles() {
   const grid=$('profile-grid');grid.replaceChildren();
   for(const profile of allProfiles()) {
-    const card=document.createElement('article');card.className=`profile-option${profile.id===settings.profile?' current':''}`;card.append(makeArt(profile));
+    const card=document.createElement('article');card.className=`profile-option${profile.id===settings.profile?' current':''}`;card.style.setProperty('--profile-color',profile.color);card.append(makeArt(profile));
     const content=document.createElement('div');content.className='profile-option-content';
     const heading=document.createElement('h3');heading.textContent=profile.name;
     const description=document.createElement('p');description.textContent=profile.description;
@@ -170,27 +180,38 @@ async function cleanupUnusedAudio() {
   for(const profile of settings.customProfiles)if(profile.audioAssetId)used.add(profile.audioAssetId);
   for(const id of await getSoundIds())if(!used.has(id)){await deleteSound(id);assets.delete(id);engine.releaseUpload(id);}
 }
-function makeAudioProfile(id,name,audioAssetId,gain){return{id,name,short:name,adjective:'Your own rhythm.',description:'Keeps moving while you type and pauses when you do.',tag:'YOUR OWN MIX',icon:'durka',color:'#8c7c9a',sound:'upload',continuous:true,audioAssetId,gain};}
+function makeAudioProfile(id,name,audioAssetId,gain){return{id,name,short:name,adjective:'Your own rhythm.',description:'Keeps moving while you type and pauses when you do.',tag:'YOUR OWN MIX',icon:'durka',sound:'upload',continuous:true,audioAssetId,gain};}
 function resetProfileAudio(){
   profileAudioRequest++;
   const player=$('profile-audio-preview');player.pause();player.removeAttribute('src');player.load();player.hidden=true;
   if(profileAudioURL)URL.revokeObjectURL(profileAudioURL);profileAudioURL=null;
   if(pendingProfileAudio&&!pendingProfileAudio.saved)engine.releaseUpload(pendingProfileAudio.asset.id);
-  pendingProfileAudio=null;$('create-audio-profile-submit').disabled=true;$('profile-audio-file').value='';
+  pendingProfileAudio=null;pendingProfileCrop=null;$('profile-audio-crop').hidden=true;$('create-audio-profile-submit').disabled=true;$('profile-audio-file').value='';
 }
 function openAudioProfile(){
   resetProfileAudio();engine.stopFlow();previewToken++;
-  $('audio-profile-form').reset();$('profile-audio-status').textContent='Choose one audio file to get started.';
+  $('audio-profile-form').reset();automaticProfileName='';$('profile-audio-status').textContent='Choose one audio file to get started.';
   $('profile-audio-error').hidden=true;$('audio-profile-dialog').showModal();
 }
-async function loadProfileAudio(file){
+function offerProfileCrop(file,duration){
+  pendingProfileCrop=file;
+  const length=audioDurationLabel(MAX_PROFILE_AUDIO_SECONDS);
+  $('profile-audio-status').textContent=`${file.name} · ${audioTimeLabel(duration)}`;
+  $('profile-audio-crop-message').textContent=`This audio exceeds the ${length} limit. Use a copy of the first ${length}? Your original file stays unchanged.`;
+  $('profile-audio-crop-confirm').textContent=`Use first ${length}`;
+  $('profile-audio-crop').hidden=false;
+}
+async function loadProfileAudio(file,{crop=false}={}){
   if(!file)return;
   resetProfileAudio();const request=profileAudioRequest,id=crypto.randomUUID();
+  const name=$('audio-profile-name'),nextName=profileNameFromFile(file.name);
+  if(!name.value.trim()||name.value===automaticProfileName)name.value=nextName;
+  automaticProfileName=nextName;
   $('profile-audio-error').hidden=true;$('profile-audio-status').textContent='Checking audio and balancing volume…';
   try{
-    const mime=audioFileMime(file);
+    let mime=audioFileMime(file);
     if(!mime)throw new Error('Choose an audio file, such as WAV, MP3, or OGG.');
-    if(file.size>MAX_PROFILE_AUDIO_BYTES)throw new Error('Choose an audio file smaller than 25 MB.');
+    if(file.size>MAX_PROFILE_AUDIO_BYTES)throw new Error(`Choose an audio file smaller than ${MAX_PROFILE_AUDIO_BYTES/1024/1024} MB.`);
     const player=$('profile-audio-preview');profileAudioURL=URL.createObjectURL(file);
     const duration=await new Promise((resolve,reject)=>{
       const finish=(error)=>{clearTimeout(timer);player.removeEventListener('loadedmetadata',loaded);player.removeEventListener('error',failed);error?reject(error):resolve(player.duration);};
@@ -199,15 +220,24 @@ async function loadProfileAudio(file){
       player.addEventListener('loadedmetadata',loaded);player.addEventListener('error',failed);player.src=profileAudioURL;player.load();
     });
     if(request!==profileAudioRequest)return;
-    if(!Number.isFinite(duration)||duration<=0||duration>MAX_PROFILE_AUDIO_SECONDS)throw new Error('Choose audio up to 5 minutes long.');
-    const data=await file.arrayBuffer();const buffer=await engine.addUpload(id,data);const gain=await engine.balanceProfile(buffer);
+    if(duration<=0)throw new Error('This audio could not be read. Try another file.');
+    if(Number.isFinite(duration)&&duration>MAX_PROFILE_AUDIO_SECONDS&&!crop){offerProfileCrop(file,duration);return;}
+    let data=await file.arrayBuffer(),buffer=await engine.addUpload(id,data),assetName=file.name;
+    if(request!==profileAudioRequest){engine.releaseUpload(id);return;}
+    if(buffer.duration>MAX_PROFILE_AUDIO_SECONDS){
+      if(!crop){engine.releaseUpload(id);offerProfileCrop(file,buffer.duration);return;}
+      $('profile-audio-status').textContent=`Preparing the first ${audioDurationLabel(MAX_PROFILE_AUDIO_SECONDS)}…`;
+      ({data,buffer}=await engine.cropUpload(id));mime='audio/wav';assetName=`${profileNameFromFile(file.name)} (cropped).wav`;
+      if(request!==profileAudioRequest){engine.releaseUpload(id);return;}
+      player.pause();URL.revokeObjectURL(profileAudioURL);profileAudioURL=URL.createObjectURL(new Blob([data],{type:mime}));player.src=profileAudioURL;player.load();
+    }
+    const gain=await engine.balanceProfile(buffer);
     if(request!==profileAudioRequest){engine.releaseUpload(id);return;}
     await engine.setProfilePreview(player,gain);
     if(request!==profileAudioRequest){engine.releaseUpload(id);return;}
-    pendingProfileAudio={asset:{id,name:file.name,data,mime},gain};
-    if(!$('audio-profile-name').value.trim())$('audio-profile-name').value=file.name.replace(/\.[^.]+$/,'').slice(0,60);
+    pendingProfileAudio={asset:{id,name:assetName,data,mime},gain};
     player.hidden=false;$('create-audio-profile-submit').disabled=false;
-    $('profile-audio-status').textContent=`${file.name} · ${Math.floor(buffer.duration/60)}:${String(Math.floor(buffer.duration%60)).padStart(2,'0')} · Volume balanced automatically`;
+    $('profile-audio-status').textContent=`${assetName} · ${audioTimeLabel(buffer.duration)} · Volume balanced automatically`;
   }catch(error){
     engine.releaseUpload(id);
     if(request!==profileAudioRequest)return;
@@ -266,7 +296,7 @@ async function importProfile(file) {
   if(!file)return;
   const importedAssets=[];
   try {
-    if(file.size>MAX_PROFILE_IMPORT_BYTES)throw new Error('Choose a profile smaller than 64 MB.');
+    if(file.size>MAX_PROFILE_IMPORT_BYTES)throw new Error(`Choose a profile smaller than ${MAX_PROFILE_IMPORT_BYTES/1024/1024} MB.`);
     const data=validateProfile(JSON.parse(await file.text()));
     const id=crypto.randomUUID(),base=profileFor(data.sound),bindings={};
     const readAudio=async(audio,continuous)=>{
@@ -322,7 +352,10 @@ async function changeScope(scope) {
 }
 function stopCapture() {capturing=false;$('capture-key').classList.remove('capturing');$('capture-key').querySelector('span').textContent='Pick any key';}
 function setupEvents() {
+  $('profile-audio-limits').textContent=`WAV, MP3, OGG, M4A · up to ${audioDurationLabel(MAX_PROFILE_AUDIO_SECONDS)} · ${MAX_PROFILE_AUDIO_BYTES/1024/1024} MB`;
   $('new-audio-profile').addEventListener('click',openAudioProfile);
+  $('profile-audio-crop-confirm').addEventListener('click',()=>{const file=pendingProfileCrop;if(file)void loadProfileAudio(file,{crop:true});});
+  $('profile-audio-crop-cancel').addEventListener('click',()=>{resetProfileAudio();$('profile-audio-status').textContent='Choose one audio file to get started.';$('profile-audio-file').click();});
   $('profile-audio-choose').addEventListener('click',()=>$('profile-audio-file').click());
   $('profile-audio-file').addEventListener('change',event=>void loadProfileAudio(event.target.files[0]));
   $('audio-profile-form').addEventListener('submit',event=>{event.preventDefault();void createAudioProfile();});

@@ -1,5 +1,8 @@
 import { MAX_PROFILE_AUDIO_BYTES, MAX_PROFILE_IMPORT_BYTES } from './profile-audio.js';
 
+export const PROFILE_COLORS=Object.freeze(['#bb7849','#b4aa8c','#7e8e7b','#ac8fa8','#89a9ae','#8c7c9a','#5d85b5','#ca685e','#9ba94e','#d2a346']);
+export function withProfileColors(profiles){return profiles.map((profile,index)=>({...profile,color:PROFILE_COLORS[index%PROFILE_COLORS.length]}));}
+
 export const PROFILES = [
   { id: 'wood', name: 'Wooden mechanical', short: 'Wooden', adjective: 'Warm. Tactile. A little nostalgic.', description: 'A satisfying wooden thock with a crisp mechanical finish.', tag: 'THE ORIGINAL', color: '#bb7849', sound: 'wood', icon: 'wood' },
   { id: 'creamy', name: 'Creamy switches', short: 'Creamy', adjective: 'Soft landings. Smooth thoughts.', description: 'A soft, rounded pop for your next long writing session.', tag: 'SOFT & MELLOW', color: '#b4aa8c', sound: 'creamy', icon: 'cream' },
@@ -45,6 +48,6 @@ export function validateProfile(data) {
       bytes+=binding.data.length;
     }
   }
-  if(bytes>MAX_PROFILE_IMPORT_BYTES) throw new Error('This profile is too large (64 MB maximum).');
+  if(bytes>MAX_PROFILE_IMPORT_BYTES) throw new Error(`This profile is too large (${MAX_PROFILE_IMPORT_BYTES/1024/1024} MB maximum).`);
   return data;
 }

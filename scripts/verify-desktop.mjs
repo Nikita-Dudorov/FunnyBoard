@@ -21,7 +21,8 @@ try {
     await page.locator('#browse-profiles').click();await page.locator('#new-audio-profile').click();
     await page.locator('#audio-profile-name').fill('Desktop audio check');
     await page.locator('#profile-audio-file').setInputFiles(path.resolve(process.env.FUNNYBOARD_QA_AUDIO));
-    await expect(page.locator('#create-audio-profile-submit')).toBeEnabled();await page.locator('#create-audio-profile-submit').click();
+    if(process.env.FUNNYBOARD_QA_CROP==='1'){await expect(page.locator('#profile-audio-crop')).toBeVisible();await page.locator('#profile-audio-crop-confirm').click();}
+    await expect(page.locator('#create-audio-profile-submit')).toBeEnabled({timeout:20000});await page.locator('#create-audio-profile-submit').click();
     await expect(page.locator('#profile-name')).toHaveText('Desktop audio check');
     const gain=await page.evaluate(()=>{const s=JSON.parse(localStorage.getItem('funnyboard.settings.v1'));return s.customProfiles.find(p=>p.id===s.profile).gain;});
     expect(Number.isFinite(gain)&&gain>0).toBe(true);

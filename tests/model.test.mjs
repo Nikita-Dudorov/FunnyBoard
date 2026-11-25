@@ -3,9 +3,25 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {readFile} from 'node:fs/promises';
 import {PROFILES,KEY_ROWS,keyName,profileFor,soundFor,noteStats,validateProfile} from '../src/model.js';
-import {profileVolumeGain} from '../src/profile-audio.js';
+import {profileVolumeGain,profileNameFromFile,audioDurationLabel,audioBufferToWav} from '../src/profile-audio.js';
 const require=createRequire(import.meta.url);
 const {createKeyMap,toDomCode}=require('../desktop/keymap.cjs');
+test('profile names and duration labels handle filenames and configurable limits',()=>{
+  assert.equal(profileNameFromFile('Rainy.night.mp3'),'Rainy.night');
+  assert.equal(profileNameFromFile('Звук клавиш.wav'),'Звук клавиш');
+  assert.equal(profileNameFromFile('A'.repeat(80)+'.wav').length,60);
+  assert.equal(audioDurationLabel(300),'5 minutes');assert.equal(audioDurationLabel(90),'1 minute 30 seconds');assert.equal(audioDurationLabel(1),'1 second');
+});
+test('cropped audio WAV encoding preserves channel order, sample values, and timing',()=>{
+  const channels=[Float32Array.from([.5,-.5,.25]),Float32Array.from([0,.75,-.75])];
+  const wav=Buffer.from(audioBufferToWav({sampleRate:16000,numberOfChannels:2,length:3,getChannelData:index=>channels[index]}));
+  assert.equal(wav.toString('ascii',0,4),'RIFF');assert.equal(wav.toString('ascii',8,12),'WAVE');
+  assert.equal(wav.readUInt16LE(22),2);assert.equal(wav.readUInt32LE(24),16000);assert.equal(wav.readUInt32LE(40),12);
+  assert.deepEqual(Array.from({length:6},(_,i)=>wav.readInt16LE(44+i*2)),[16384,0,-16384,24576,8192,-24576]);
+  const hot=Float32Array.from([2,-2,1]),before=hot.slice();
+  const safe=Buffer.from(audioBufferToWav({sampleRate:16000,numberOfChannels:1,length:3,getChannelData:()=>hot}));
+  assert.deepEqual(Array.from({length:3},(_,i)=>safe.readInt16LE(44+i*2)),[32767,-32767,16384]);assert.deepEqual(hot,before);
+});
 
 test('bindings are scoped to the selected profile, and fall back to its sound',()=>{
   const bindings={'wood:KeyA':{type:'preset',sound:'arcade'}};

@@ -1,6 +1,7 @@
 import {test,expect} from '@playwright/test';
 import path from 'node:path';
 import {readFile} from 'node:fs/promises';
+import {validateProfile} from '../src/model.js';
 
 function audioFile({amplitude=.02,duration=4,sampleRate=8000,channels=2}={}){
   const frames=Math.round(duration*sampleRate),buffer=Buffer.alloc(44+frames*channels*2);
@@ -56,12 +57,60 @@ test('invalid and canceled profile uploads leave no saved profiles or audio',asy
   await page.locator('#profile-audio-file').setInputFiles({name:'silent.wav',mimeType:'audio/wav',buffer:audioFile({amplitude:0})});
   await expect(page.locator('#profile-audio-error')).toContainText('silent');
   await page.locator('#profile-audio-file').setInputFiles({name:'too-long.wav',mimeType:'audio/wav',buffer:audioFile({duration:301,channels:1})});
-  await expect(page.locator('#profile-audio-error')).toContainText('5 minutes');
+  await expect(page.locator('#profile-audio-crop')).toBeVisible();
+  await expect(page.locator('#profile-audio-crop-message')).toContainText('5 minutes');
+  await expect(page.locator('#create-audio-profile-submit')).toBeDisabled();
   await page.locator('#profile-audio-file').setInputFiles({name:'valid.wav',mimeType:'audio/wav',buffer:audioFile()});
   await expect(page.locator('#create-audio-profile-submit')).toBeEnabled();
   await page.locator('#audio-profile-dialog .close-dialog').click();
   const stored=await page.evaluate(async()=>{const store=await import('/store.js');return{ids:await store.getSoundIds(),profiles:JSON.parse(localStorage.getItem('funnyboard.settings.v1')).customProfiles};});
   expect(stored.ids).toEqual([]);expect(stored.profiles).toEqual([]);
+});
+
+test('filename prefills immediately and follows file changes without replacing custom names',async({page})=>{
+  await page.goto('/');await openAudioForm(page);
+  await page.locator('#profile-audio-file').setInputFiles({name:'Rainy.night.wav',mimeType:'audio/wav',buffer:audioFile()});
+  await expect(page.locator('#audio-profile-name')).toHaveValue('Rainy.night');
+  await page.locator('#profile-audio-file').setInputFiles({name:'Ocean.wav',mimeType:'audio/wav',buffer:audioFile()});
+  await expect(page.locator('#audio-profile-name')).toHaveValue('Ocean');
+  await page.locator('#audio-profile-name').fill('My own name');
+  await page.locator('#profile-audio-file').setInputFiles({name:'Another.wav',mimeType:'audio/wav',buffer:audioFile()});
+  await expect(page.locator('#audio-profile-name')).toHaveValue('My own name');
+});
+
+test('overlength audio offers cropping and saves an approved copy at the configured limit',async({page})=>{
+  await page.goto('/');await openAudioForm(page);
+  await page.locator('#profile-audio-file').setInputFiles({name:'Long audio.wav',mimeType:'audio/wav',buffer:audioFile({duration:301,channels:1})});
+  await expect(page.locator('#audio-profile-name')).toHaveValue('Long audio');
+  await expect(page.locator('#profile-audio-crop')).toBeVisible();
+  await expect(page.locator('#create-audio-profile-submit')).toBeDisabled();
+  expect(await page.evaluate(async()=>{const store=await import('/store.js');return (await store.getSoundIds()).length;})).toBe(0);
+  await page.locator('#audio-profile-name').fill('Cropped mix');await page.locator('#profile-audio-crop-confirm').click();
+  await expect(page.locator('#create-audio-profile-submit')).toBeEnabled({timeout:20000});
+  await expect(page.locator('#audio-profile-name')).toHaveValue('Cropped mix');
+  await expect(page.locator('#profile-audio-status')).toContainText('5:00');
+  await page.locator('#create-audio-profile-submit').click();await expect(page.locator('#profile-name')).toHaveText('Cropped mix');
+  const saved=await page.evaluate(async()=>{
+    const store=await import('/store.js');const s=JSON.parse(localStorage.getItem('funnyboard.settings.v1')),p=s.customProfiles.find(p=>p.id===s.profile),a=await store.getSound(p.audioAssetId),v=new DataView(a.data);
+    return{mime:a.mime,name:a.name,channels:v.getUint16(22,true),duration:(a.data.byteLength-44)/v.getUint32(28,true),gain:p.gain};
+  });
+  expect(saved.mime).toBe('audio/wav');expect(saved.name).toContain('cropped');expect(saved.duration).toBe(300);expect(saved.channels).toBe(1);expect(saved.gain).toBeGreaterThan(0);
+  await page.locator('#browse-profiles').click();const promise=page.waitForEvent('download');await page.locator('#export-profile').click();const download=await promise;
+  const backup=JSON.parse(await readFile(await download.path(),'utf8'));expect(validateProfile(backup).version).toBe(2);
+  expect(Buffer.from(backup.audio.data.split(',')[1],'base64').length).toBeGreaterThan(25*1024*1024);
+  await page.locator('#profiles-dialog .close-dialog').click();
+  await page.reload();await expect(page.locator('#profile-name')).toHaveText('Cropped mix');
+});
+
+test('declining a crop can choose another file without saving the long audio',async({page})=>{
+  await page.goto('/');await openAudioForm(page);
+  await page.locator('#profile-audio-file').setInputFiles({name:'Long.wav',mimeType:'audio/wav',buffer:audioFile({duration:301,channels:1})});
+  await expect(page.locator('#profile-audio-crop')).toBeVisible();
+  const chooser=page.waitForEvent('filechooser');await page.locator('#profile-audio-crop-cancel').click();
+  await (await chooser).setFiles({name:'Short.wav',mimeType:'audio/wav',buffer:audioFile()});
+  await expect(page.locator('#profile-audio-crop')).toBeHidden();await expect(page.locator('#audio-profile-name')).toHaveValue('Short');
+  await expect(page.locator('#create-audio-profile-submit')).toBeEnabled();
+  expect(await page.evaluate(async()=>{const store=await import('/store.js');return(await store.getSoundIds()).length;})).toBe(0);
 });
 
 test('Durka keeps one continuous stream while typing, pauses and resumes its cursor',async({page})=>{

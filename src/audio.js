@@ -1,5 +1,5 @@
 import { PROFILES } from './model.js';
-import { profileVolumeGain } from './profile-audio.js';
+import { profileVolumeGain, audioBufferToWav, MAX_PROFILE_AUDIO_SECONDS } from './profile-audio.js';
 const PRESET_FILES = PROFILES.flatMap(profile=>(profile.continuous?['flow']:['key','space','enter']).map(kind=>`${profile.sound}-${kind}`));
 const FLOW_HOLD_MS=400;
 const FLOW_FADE_MS=70;
@@ -75,6 +75,16 @@ export class SoundEngine {
   }
   releaseUpload(id) {this.raw.delete(id);this.buffers.delete(id);}
   async addUpload(id,data) { this.raw.set(id,data); await this.unlock(); return this.decode(id,data); }
+  async cropUpload(id){
+    const input=this.buffers.get(id);
+    if(!input||input.numberOfChannels<1||input.numberOfChannels>2)throw new Error('Choose a mono or stereo audio file.');
+    const sampleRate=Math.min(input.sampleRate,48000);
+    const context=new OfflineAudioContext(input.numberOfChannels,Math.floor(Math.min(input.duration,MAX_PROFILE_AUDIO_SECONDS)*sampleRate),sampleRate);
+    const source=context.createBufferSource();source.buffer=input;source.connect(context.destination);source.start();
+    const rendered=await context.startRendering(),data=audioBufferToWav(rendered);
+    this.raw.set(id,data);this.buffers.delete(id);
+    const buffer=await this.decode(id,data);return{buffer,data};
+  }
   async play(code,binding,{preview=false}={}) {
     if(this.muted && !preview) return;
     await this.unlock();
