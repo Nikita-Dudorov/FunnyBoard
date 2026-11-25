@@ -64,7 +64,12 @@ try {
   const continuous=process.env.FUNNYBOARD_QA_AUDIO||PROFILES.find(profile=>profile.name===process.env.FUNNYBOARD_QA_PROFILE)?.continuous;
   expect(await page.evaluate(()=>window.bindingStarts.map(s=>s.loop))).toEqual([Boolean(continuous)]);
   expect(await page.evaluate(()=>window.bindingActive.size)).toBe(1);
-  await page.locator('#reset-key').click();await page.locator('#editor').press('Backspace');
+  await page.locator('#reset-all-bindings').click();await expect(page.locator('#cancel-reset-bindings')).toBeFocused();
+  await expect(page.locator('#confirm-reset-bindings')).toBeDisabled();await page.keyboard.press('Enter');
+  await expect(page.locator('#binding-count')).toHaveText('1 custom binding');
+  await page.locator('#reset-all-bindings').click();await page.locator('#reset-bindings-acknowledge').check();
+  await page.locator('#confirm-reset-bindings').click();await expect(page.locator('#binding-count')).toHaveText('0 custom bindings');
+  await page.locator('#editor').press('Backspace');
   await page.evaluate(()=>{
     window.globalKeys=[];window.sourcesPlayed=0;
     window.funnyboard.onKey(key=>window.globalKeys.push(key));
@@ -105,5 +110,5 @@ try {
   await page.locator('#editor').fill('');await page.waitForTimeout(300);
   await page.screenshot({path:'/tmp/funnyboard-desktop.png',fullPage:true});
   expect(errors).toEqual([]);
-  console.log('Desktop QA passed: no startup selection, Escape picking, clearing selection, typing, per-key bindings without duplicate previews, global key events, background audio, and mode switching.');
+  console.log('Desktop QA passed: no startup selection, Escape picking, clearing selection, safe bulk binding reset, typing, per-key bindings without duplicate previews, global key events, background audio, and mode switching.');
 } finally {if(application)await application.close();await rm(userData,{recursive:true,force:true});}

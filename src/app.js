@@ -12,6 +12,7 @@ let pendingProfileAudio=null,pendingProfileCrop=null,profileAudioURL=null,profil
 let selectedKey=null, capturing=false, uploadingKeyAudio=false, toastTimer, saveTimer, rhythmTimer, sessionStart=0, sessionKeys=0, previewToken=0;
 let storageWarning=false, soundWarning=false;
 let restoreEditorAfterSoundChange=false;
+let pendingBindingReset=null;
 const keyElements=new Map();
 const pressed=new Set();
 const allProfiles=()=>withProfileColors([...PROFILES,...settings.customProfiles]);
@@ -92,7 +93,48 @@ function updateBindingUI() {
   $('reset-key').hidden=!own;
   const count=Object.keys(settings.bindings).filter(key=>key.startsWith(`${settings.profile}:`)).length;
   $('binding-count').textContent=`${count} custom binding${count===1?'':'s'}`;
+  $('reset-all-bindings').disabled=uploadingKeyAudio||Object.keys(settings.bindings).length===0;
   for(const [code,element] of keyElements) element.classList.toggle('custom',Boolean(settings.bindings[`${settings.profile}:${code}`]));
+}
+function bindingsToReset(){
+  if(!pendingBindingReset)return [];
+  const {scope,profileId}=pendingBindingReset;
+  return Object.entries(settings.bindings).filter(([key])=>scope==='all'||key.startsWith(`${profileId}:`));
+}
+function updateResetBindingButton(){
+  $('confirm-reset-bindings').disabled=!pendingBindingReset?.entries.length||!$('reset-bindings-acknowledge').checked;
+}
+function updateResetBindingConfirmation(){
+  if(!pendingBindingReset)return;
+  const target=pendingBindingReset;target.scope=$('reset-bindings-scope').value;target.entries=bindingsToReset();
+  const count=target.entries.length,location=target.scope==='all'?'all profiles':`“${target.profileName}”`;
+  $('reset-bindings-summary').textContent=`This will remove ${count} custom key binding${count===1?'':'s'} from ${location}. Every affected key will use its profile’s default sound.`;
+  $('reset-bindings-acknowledge').checked=false;
+  $('confirm-reset-bindings').textContent=`Reset ${count} binding${count===1?'':'s'}`;
+  updateResetBindingButton();
+}
+function openBindingReset(){
+  if(uploadingKeyAudio||!Object.keys(settings.bindings).length)return;
+  stopCapture();previewToken++;engine.stopPlayback();
+  pendingBindingReset={profileId:settings.profile,profileName:currentProfile().name,scope:'profile',entries:[]};
+  $('reset-bindings-scope').value='profile';
+  $('reset-bindings-scope').options[0].textContent=`Current profile: ${pendingBindingReset.profileName}`;
+  updateResetBindingConfirmation();$('reset-bindings-dialog').showModal();$('cancel-reset-bindings').focus();
+}
+function confirmBindingReset(){
+  const target=pendingBindingReset;
+  if(!target?.entries.length||!$('reset-bindings-acknowledge').checked)return;
+  const entries=bindingsToReset();
+  if(entries.length!==target.entries.length||target.entries.some(([key,binding])=>settings.bindings[key]!==binding)){
+    updateResetBindingConfirmation();toast('Key bindings changed. Review the updated count and confirm again.');return;
+  }
+  const bindings={...settings.bindings};for(const [key]of entries)delete bindings[key];
+  try{saveSettings({...settings,bindings});}
+  catch{toast('Could not save the reset. Your key bindings have been kept.',true);return;}
+  settings.bindings=bindings;previewToken++;engine.stopPlayback();updateBindingUI();
+  $('reset-bindings-dialog').close();$('editor').focus({preventScroll:true});
+  toast(`${entries.length} custom key binding${entries.length===1?'':'s'} reset ${target.scope==='all'?'in all profiles':`in ${target.profileName}`}.`);
+  void cleanupUnusedAudio().catch(error=>console.warn('Unused key audio could not be removed:',error));
 }
 function updateProfileUI() {
   const profile=currentProfile();
@@ -384,6 +426,12 @@ function setupEvents() {
   $('preview-profile').addEventListener('click',()=>void previewSequence());
   $('preview-key').addEventListener('click',()=>{if(selectedKey)void play(selectedKey,undefined,true);});
   $('clear-key-selection').addEventListener('click',clearKeySelection);
+  $('reset-all-bindings').addEventListener('click',openBindingReset);
+  $('reset-bindings-scope').addEventListener('change',updateResetBindingConfirmation);
+  $('reset-bindings-acknowledge').addEventListener('change',updateResetBindingButton);
+  $('confirm-reset-bindings').addEventListener('click',confirmBindingReset);
+  $('cancel-reset-bindings').addEventListener('click',()=>$('reset-bindings-dialog').close());
+  $('reset-bindings-dialog').addEventListener('close',()=>{pendingBindingReset=null;$('reset-bindings-acknowledge').checked=false;updateResetBindingButton();});
   $('help-button').addEventListener('click',()=>$('help-dialog').showModal());
   document.querySelectorAll('.close-dialog').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
   document.querySelectorAll('dialog').forEach(dialog=>{

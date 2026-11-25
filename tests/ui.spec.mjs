@@ -27,11 +27,92 @@ async function trackPlayback(page){
   });
 }
 
+async function seedBulkReset(page){
+  await page.addInitScript(()=>{
+    if(localStorage.getItem('funnyboard.settings.v1'))return;
+    localStorage.setItem('funnyboard.settings.v1',JSON.stringify({profile:'wood',bindings:{'wood:KeyQ':{type:'preset',sound:'arcade'},'wood:Escape':{type:'preset',sound:'creamy'},'creamy:KeyW':{type:'preset',sound:'typewriter'}}}));
+    localStorage.setItem('funnyboard.note.v1','Keep this note.');
+  });
+  await page.goto('/');
+}
+const savedBindings=page=>page.evaluate(()=>JSON.parse(localStorage.getItem('funnyboard.settings.v1')).bindings);
+
+test('bulk reset requires acknowledgement and every cancel path keeps bindings',async({page})=>{
+  await seedBulkReset(page);const original=await savedBindings(page);
+  for(const cancel of ['Enter','Escape','button','backdrop']){
+    await page.locator('#reset-all-bindings').click();await expect(page.locator('#cancel-reset-bindings')).toBeFocused();
+    await expect(page.locator('#reset-bindings-summary')).toContainText('2 custom key bindings');
+    await expect(page.locator('#reset-bindings-summary')).toContainText('Wooden mechanical');
+    await expect(page.locator('#confirm-reset-bindings')).toBeDisabled();
+    await page.evaluate(()=>document.getElementById('confirm-reset-bindings').click());expect(await savedBindings(page)).toEqual(original);
+    if(cancel!=='Enter'){await page.locator('#reset-bindings-acknowledge').check();await expect(page.locator('#confirm-reset-bindings')).toBeEnabled();}
+    if(cancel==='button')await page.locator('#cancel-reset-bindings').click();
+    else if(cancel==='backdrop')await page.mouse.click(1,1);
+    else await page.keyboard.press(cancel);
+    await expect(page.locator('#reset-bindings-dialog')).not.toBeVisible();expect(await savedBindings(page)).toEqual(original);
+  }
+  await expect(page.locator('#editor')).toHaveValue('Keep this note.');
+});
+
+test('bulk reset defaults to the current profile and persists without changing another profile',async({page})=>{
+  await seedBulkReset(page);await page.locator('[data-code="KeyQ"]').click();await page.locator('#reset-all-bindings').click();
+  await expect(page.locator('#reset-bindings-scope')).toHaveValue('profile');await page.locator('#reset-bindings-acknowledge').check();
+  await page.locator('#confirm-reset-bindings').click();await expect(page.locator('#binding-count')).toHaveText('0 custom bindings');
+  await expect(page.locator('#key-sound')).toHaveValue('default');await expect(page.locator('.key.custom')).toHaveCount(0);
+  expect(await savedBindings(page)).toEqual({'creamy:KeyW':{type:'preset',sound:'typewriter'}});
+  await page.reload();await expect(page.locator('#binding-count')).toHaveText('0 custom bindings');await expect(page.locator('#editor')).toHaveValue('Keep this note.');
+  await page.locator('#reset-all-bindings').click();await expect(page.locator('#reset-bindings-summary')).toContainText('0 custom key bindings');
+  await page.locator('#reset-bindings-acknowledge').check();await expect(page.locator('#confirm-reset-bindings')).toBeDisabled();
+});
+
+test('resetting every profile requires fresh acknowledgement after changing scope',async({page})=>{
+  await seedBulkReset(page);await page.locator('#reset-all-bindings').click();await page.locator('#reset-bindings-acknowledge').check();
+  await page.locator('#reset-bindings-scope').selectOption('all');await expect(page.locator('#reset-bindings-acknowledge')).not.toBeChecked();
+  await expect(page.locator('#confirm-reset-bindings')).toBeDisabled();await expect(page.locator('#reset-bindings-summary')).toContainText('3 custom key bindings from all profiles');
+  await page.locator('#reset-bindings-acknowledge').check();await page.locator('#confirm-reset-bindings').click();
+  expect(await savedBindings(page)).toEqual({});await expect(page.locator('#reset-all-bindings')).toBeDisabled();
+  await page.reload();expect(await savedBindings(page)).toEqual({});await expect(page.locator('#editor')).toHaveValue('Keep this note.');
+});
+
+test('a failed save keeps every binding and leaves reset open for cancellation',async({page})=>{
+  await seedBulkReset(page);const original=await savedBindings(page);await page.locator('#reset-all-bindings').click();await page.locator('#reset-bindings-acknowledge').check();
+  await page.evaluate(()=>{
+    const setItem=Storage.prototype.setItem;
+    Storage.prototype.setItem=function(key,value){if(key==='funnyboard.settings.v1')throw new DOMException('Storage unavailable','QuotaExceededError');return setItem.call(this,key,value);};
+    window.restoreSettingsWrites=()=>Storage.prototype.setItem=setItem;
+  });
+  await page.locator('#confirm-reset-bindings').click();await expect(page.locator('#toast')).toContainText('Your key bindings have been kept');
+  await expect(page.locator('#reset-bindings-dialog')).toBeVisible();expect(await savedBindings(page)).toEqual(original);
+  await page.evaluate(()=>window.restoreSettingsWrites());await page.locator('#cancel-reset-bindings').click();
+  await page.reload();await expect(page.locator('#binding-count')).toHaveText('2 custom bindings');expect(await savedBindings(page)).toEqual(original);
+});
+
+test('bulk reset preserves profile audio and shared key files until their last binding is removed',async({page})=>{
+  await trackPlayback(page);await page.goto('/');await createFromAudio(page,'Keep my audio',audioFile());
+  const profile=await page.evaluate(async()=>{
+    const store=await import('/store.js'),s=JSON.parse(localStorage.getItem('funnyboard.settings.v1')),profile=s.customProfiles.find(p=>p.id===s.profile);
+    const data=await (await fetch('/assets/sounds/wood-key.wav')).arrayBuffer();
+    for(const id of ['shared-key','unused-key'])await store.putSound({id,name:id+'.wav',mime:'audio/wav',data});
+    s.bindings={[`${profile.id}:KeyQ`]:{type:'upload',assetId:'shared-key',name:'shared.wav'},[`${profile.id}:Escape`]:{type:'upload',assetId:'unused-key',name:'unused.wav'},'wood:KeyW':{type:'upload',assetId:'shared-key',name:'shared.wav'}};
+    store.saveSettings(s);return profile;
+  });
+  await page.reload();await page.locator('#reset-all-bindings').click();await page.locator('#reset-bindings-acknowledge').check();await page.locator('#confirm-reset-bindings').click();
+  const ids=()=>page.evaluate(async()=>{const store=await import('/store.js');return store.getSoundIds();});
+  await expect.poll(ids).not.toContain('unused-key');expect(await ids()).toEqual(expect.arrayContaining([profile.audioAssetId,'shared-key']));
+  await page.locator('#reset-all-bindings').click();await page.locator('#reset-bindings-scope').selectOption('all');
+  await page.locator('#reset-bindings-acknowledge').check();await page.locator('#confirm-reset-bindings').click();
+  await expect.poll(ids).toEqual([profile.audioAssetId]);await expect(page.locator('#profile-name')).toHaveText('Keep my audio');
+  const profiles=await page.evaluate(()=>JSON.parse(localStorage.getItem('funnyboard.settings.v1')).customProfiles);expect(profiles).toEqual([profile]);
+  await page.evaluate(()=>window.playbackStarts=[]);await page.locator('#editor').press('a');
+  await expect.poll(()=>page.evaluate(()=>window.playbackStarts.some(s=>s.loop&&Math.abs(s.duration-4)<.001))).toBe(true);
+});
+
 test('startup and normal typing leave every key unselected',async({page})=>{
   const errors=[];page.on('pageerror',error=>errors.push(error.message));await trackPlayback(page);await page.goto('/');
   await expect(page.locator('.key.selected')).toHaveCount(0);await expect(page.locator('#selected-key-name')).toHaveText('No key selected');
   for(const id of ['key-sound','preview-key','upload-zone','audio-file'])await expect(page.locator(`#${id}`)).toBeDisabled();
   await expect(page.locator('#clear-key-selection')).toBeHidden();
+  await expect(page.locator('#reset-all-bindings')).toBeDisabled();
   await page.locator('#editor').pressSequentially('abc',{delay:80});
   await expect(page.locator('#editor')).toHaveValue('abc');await expect.poll(()=>page.evaluate(()=>window.playbackStarts.length)).toBeGreaterThan(0);
   await expect(page.locator('.key.selected')).toHaveCount(0);

@@ -4,15 +4,15 @@ A little more joy in every keystroke. A desktop writing space with wooden mechan
 
 ## Install and open
 
-**Ubuntu / Debian:** open `release/funnyboard_1.0.4_amd64.deb` with your software installer, or run:
+**Ubuntu / Debian:** open `release/funnyboard_1.0.5_amd64.deb` with your software installer, or run:
 
 ```bash
-sudo apt install ./release/funnyboard_1.0.4_amd64.deb
+sudo apt install ./release/funnyboard_1.0.5_amd64.deb
 ```
 
 Then open **FunnyBoard** from your applications menu. The installer bundles everything; Node.js and Python are not needed.
 
-**Portable Linux:** make `release/FunnyBoard-1.0.4.AppImage` executable in its file properties and open it. AppImage requires FUSE. If FUSE is unavailable, run `./FunnyBoard-1.0.4.AppImage --appimage-extract` and open `squashfs-root/funnyboard`. The Debian installer is recommended on Ubuntu because it also configures the Chromium sandbox.
+**Portable Linux:** make `release/FunnyBoard-1.0.5.AppImage` executable in its file properties and open it. AppImage requires FUSE. If FUSE is unavailable, run `./FunnyBoard-1.0.5.AppImage --appimage-extract` and open `squashfs-root/funnyboard`. The Debian installer is recommended on Ubuntu because it also configures the Chromium sandbox.
 
 **Windows and macOS:** native installer builds are configured and can be generated on their respective operating systems using the commands below or the included GitHub Actions workflow. Those installers have not been built or tested in this Linux workspace. Release builds are unsigned unless signing credentials are supplied.
 
@@ -25,6 +25,8 @@ Then open **FunnyBoard** from your applications menu. The installer bundles ever
 5. Use the volume slider and sound toggle. **Ctrl/Cmd + Shift + M** toggles sound while FunnyBoard is focused. Explicit preview buttons play a sample even when typing sounds are muted.
 
 To create a continuous profile, open **All profiles → Create profile from audio** and choose one audio file (up to **64 MB**). The name fills in from the filename; you can edit it, and a name you enter yourself is kept when you choose another file. The duration limit is currently **5 minutes**. Longer audio prompts you to use a cropped copy of the beginning; cropping requires your selection and leaves the original file unchanged. Preview it, then select **Create profile**. Loudness is balanced automatically with the built-in profiles while preserving pitch and stereo channels. Each press continues playback; pauses fade out and save the position for the next press.
+
+Use **Reset all key bindings…** below the keyboard to reset the current profile or all profiles. The confirmation shows the affected count and requires an acknowledgement checkbox before Reset is enabled. Cancel, Esc, or clicking outside the dialog keeps the bindings. Profiles, profile audio, and notes are preserved.
 
 Notes, volume, the selected profile, and bindings save automatically on your device. Profiles have independent key bindings. **Copy current profile** copies your current setup. **Export current profile** creates a JSON backup including the full uploaded audio; **Import profile** restores it as a new profile and balances its loudness automatically. Existing profile backups remain supported. The download button above the note saves a plain text file.
 
