@@ -1,108 +1,67 @@
 # FunnyBoard
 
-A little more joy in every keystroke. A desktop writing space with wooden mechanical sounds by default, six sound profiles, and a custom sound for any physical key.
+A desktop writing space with customizable keyboard sounds. Choose from six built-in profiles, assign sounds to individual keys, or create a continuous profile from your own audio.
 
 ## Download and install
 
-Open the [latest FunnyBoard release](https://github.com/Nikita-Dudorov/FunnyBoard/releases/latest), or browse [all releases](https://github.com/Nikita-Dudorov/FunnyBoard/releases). Under **Assets**, download an installer for your operating system. The **Source code (zip)** and **Source code (tar.gz)** downloads contain the source for building the app yourself.
+Download an installer from the [latest release](https://github.com/Nikita-Dudorov/FunnyBoard/releases/latest), when available for your platform:
 
-**Ubuntu / Debian (64-bit x86):** download the `.deb` file. For version **1.0.5**, it is named `funnyboard_1.0.5_amd64.deb`. Open it with your software installer, or open a terminal in the folder containing the downloaded file and run:
+- **Ubuntu / Debian (x86-64):** open the `.deb` with your software installer.
+- **Portable Linux:** make the `.AppImage` executable and run it. Requires FUSE.
+- **Windows / macOS:** open the `.exe` installer or `.dmg`.
 
-```bash
-sudo apt install ./funnyboard_1.0.5_amd64.deb
-```
+Installed builds need no Node.js or Python. To build from source, see [Development](#development).
 
-Use the filename you downloaded if installing another version. Then open **FunnyBoard** from your applications menu. Node.js and Python are not needed to use the installed app; `apt` installs required system libraries.
+## Use it
 
-**Portable Linux (optional):** if the release includes an AppImage, download it, make it executable in its file properties, and open it. AppImage requires FUSE. If FUSE is unavailable, run `./FunnyBoard-1.0.5.AppImage --appimage-extract` and open `squashfs-root/funnyboard`, adjusting the filename for your version. The `.deb` installer works on its own and does not require AppImage.
+- Start typing; **Wooden mechanical** is selected by default. Change profiles under **Set the mood**.
+- Click a key on the visual keyboard or use **Pick any key** to assign a built-in sound or upload a clip (up to **3 seconds / 5 MB**). Bindings follow physical keys regardless of typing language.
+- Open **All profiles → Create profile from audio** to add a continuous profile (up to **5 minutes / 64 MB**). Longer audio can be cropped without changing the original file. Playback fades when you pause and resumes as you type.
+- Adjust volume with the slider; **Ctrl/Cmd + Shift + M** toggles sound while the app is focused. Preview buttons work even when typing sounds are muted.
+- Copy, export, or import profiles to reuse setups. Exports include uploaded audio; each profile has independent key bindings. **Reset all key bindings…** clears bindings for the current profile or all profiles.
 
-**Windows and macOS:** when available in a release, download and open the Windows `.exe` installer or the macOS `.dmg`. If your release has no installer for your system, use the build instructions below.
+Notes, profiles, and settings save automatically on your device. The download button above the note saves it as plain text.
 
-## Build an installer yourself
+## Everywhere mode
 
-Install [Node.js](https://nodejs.org/en/download) **22.12 or newer** and npm; **Node.js 24** is recommended and is used by the automated builds. Internet access is needed to download dependencies and build tools. Build on the operating system you plan to install on. The Linux Debian package currently targets **x86-64 / amd64** and requires `dpkg-deb`, which is supplied by the `dpkg` package on Ubuntu/Debian.
+Select **Everywhere** to play sounds in other apps. Closing the window keeps FunnyBoard in the system tray, where you can reopen, mute, or quit it. In **FunnyBoard only** mode, closing the window quits.
 
-Download **Source code (zip)** from the release you want to build, extract it, and open a terminal in the extracted folder containing `package.json`. Alternatively, clone the repository to build its latest source:
+- **Windows:** works with the bundled keyboard listener.
+- **macOS:** grant **System Settings → Privacy & Security → Accessibility** access, then select Everywhere again.
+- **Linux:** requires **X11** and `libxtst6`, `libx11-6`, and `libxkbcommon0` (installed by the `.deb`). Wayland supports FunnyBoard-only mode.
+
+The listener handles physical key identifiers and press/release states, never text from other apps. It stops when you disable Everywhere or quit. FunnyBoard has no accounts, telemetry, or network services; your data stays local.
+
+## Development
+
+Requires [Node.js](https://nodejs.org/en/download) **22.12+** (24 recommended) and npm. Installing dependencies requires internet access.
 
 ```bash
 git clone https://github.com/Nikita-Dudorov/FunnyBoard.git
 cd FunnyBoard
-```
-
-Install the project dependencies:
-
-```bash
-npm ci
-```
-
-Then run the build command for your operating system:
-
-| Build system | Command | Files created in `release/` |
-| --- | --- | --- |
-| Ubuntu / Debian, x86-64 | `npm run dist:linux` | `.deb` installer and portable `.AppImage` |
-| Windows | `npm run dist:win` | `.exe` installer |
-| macOS | `npm run dist:mac` | `.dmg` disk image |
-
-The version in `package.json` determines the filenames. For example, building **1.0.5** on Ubuntu creates `release/funnyboard_1.0.5_amd64.deb` and `release/FunnyBoard-1.0.5.AppImage`. Install the Debian package from the project folder with:
-
-```bash
-sudo apt install ./release/funnyboard_1.0.5_amd64.deb
-```
-
-The generated `release/` folder is excluded from Git, so downloading or cloning the source does not include locally built installers. Windows and macOS builds are configured but have not been tested in this Linux workspace. Release builds are unsigned unless signing credentials are supplied.
-
-## Use it
-
-1. Start typing in the writing space. Wooden mechanical sounds are selected automatically.
-2. Open **Set the mood** to select **Wooden mechanical**, **Creamy switches**, **Vintage typewriter**, **Pocket arcade**, **Bubble pop**, or **Durka**. Each includes a preview. Durka continues smoothly as you type, fades when you pause, and resumes from its previous position. The other profiles have distinct sounds for regular keys, Space, and Enter.
-3. The app starts with no key selected. Click a key on the visual keyboard to customize it, then choose another built-in sound or drop an audio file on the sound panel. Click that key again or use **Clear selection** to deselect it; its saved sound stays assigned. **Pick any key** accepts every key, including Esc and numpad keys. Click the picking button again to cancel. WAV, MP3, OGG, M4A, FLAC, AAC and WebM are accepted when the platform decoder supports them; clips must be at most 3 seconds and 5 MB. The physical key position is used regardless of your typing language.
-4. Choose **FunnyBoard only** or **Everywhere**. Everywhere plays sounds in other apps, including while FunnyBoard is minimized. Closing its window in this mode keeps it in the system tray. The tray menu opens, mutes, or quits the app. In FunnyBoard-only mode, closing the window quits.
-5. Use the volume slider and sound toggle. **Ctrl/Cmd + Shift + M** toggles sound while FunnyBoard is focused. Explicit preview buttons play a sample even when typing sounds are muted.
-
-To create a continuous profile, open **All profiles → Create profile from audio** and choose one audio file (up to **64 MB**). The name fills in from the filename; you can edit it, and a name you enter yourself is kept when you choose another file. The duration limit is currently **5 minutes**. Longer audio prompts you to use a cropped copy of the beginning; cropping requires your selection and leaves the original file unchanged. Preview it, then select **Create profile**. Loudness is balanced automatically with the built-in profiles while preserving pitch and stereo channels. Each press continues playback; pauses fade out and save the position for the next press.
-
-Use **Reset all key bindings…** below the keyboard to reset the current profile or all profiles. The confirmation shows the affected count and requires an acknowledgement checkbox before Reset is enabled. Cancel, Esc, or clicking outside the dialog keeps the bindings. Profiles, profile audio, and notes are preserved.
-
-Notes, volume, the selected profile, and bindings save automatically on your device. Profiles have independent key bindings. **Copy current profile** copies your current setup. **Export current profile** creates a JSON backup including the full uploaded audio; **Import profile** restores it as a new profile and balances its loudness automatically. Existing profile backups remain supported. The download button above the note saves a plain text file.
-
-Profile colors cycle through a palette of 10 in menu order, so any 10 consecutive profiles have different colors. The active profile and its menu card use the same color. Existing profiles, copies, and imports all follow this rule.
-
-## Everywhere mode
-
-- **Windows:** uses the bundled native keyboard listener.
-- **macOS:** grant FunnyBoard **System Settings → Privacy & Security → Accessibility** access when prompted, then select Everywhere again.
-- **Linux:** requires an **X11** session, `libxtst6`, `libx11-6`, and `libxkbcommon0`. The Debian package declares these dependencies. Wayland cannot expose all application key events through this listener; the app explains this and keeps FunnyBoard-only mode available.
-
-The listener forwards only physical key identifiers and press/release states to the sound engine. It never saves text from other applications. Your note is saved locally because you type it into FunnyBoard's editor. There are no accounts, telemetry, network services, or remote fonts. The listener is stopped when you switch back to FunnyBoard-only mode or quit.
-
-## Develop
-
-Requires Node.js **22.12+** (Node.js 24 recommended) and npm. First install downloads Electron; subsequent app use works offline.
-
-```bash
 npm ci
 npm start
 ```
 
-`npm run preview` serves a browser preview at `http://localhost:4173`. It has the same editor, profiles, uploads, and local persistence; Everywhere requires the desktop app.
+`npm run preview` serves a browser preview at `http://localhost:4173`; Everywhere requires the desktop app.
 
 ```bash
-npm run check          # JavaScript syntax checks
-npm test               # Sound assets, profile validation, key mapping, note counts
-npm run test:ui        # Chrome integration tests
-npm run test:desktop   # Linux/X11 native integration test in temporary windows
+npm run check         # Syntax checks
+npm test              # Unit tests
+npm run test:ui       # Chrome integration tests
+npm run test:desktop  # Linux/X11 integration test
 ```
 
-See [Build an installer yourself](#build-an-installer-yourself) for packaging commands.
+UI tests default to `/usr/bin/google-chrome`; override with `CHROME_PATH`. Desktop tests require Python 3 and X11; set `FUNNYBOARD_EXECUTABLE` to test a packaged app.
 
-The UI tests use Google Chrome at `/usr/bin/google-chrome`; set `CHROME_PATH` to another Chrome/Chromium executable as needed. Desktop QA injects two XTest key presses into a temporary test window and needs Python 3 and an X11 session. Set `FUNNYBOARD_EXECUTABLE` to test a packaged app instead of the development build. It uses temporary app data, leaving your notes and profiles alone.
+Build installers on the target operating system. Output goes to `release/`:
 
-The repository includes a manual/tag-triggered GitHub Actions workflow to build installers on Linux, Windows, and macOS and upload them as workflow artifacts. Maintainers attach installer files to GitHub Releases separately; the workflow does not publish releases automatically.
+| Platform | Command | Output |
+| --- | --- | --- |
+| Ubuntu / Debian, x86-64 | `npm run dist:linux` | `.deb`, `.AppImage` |
+| Windows | `npm run dist:win` | `.exe` |
+| macOS | `npm run dist:mac` | `.dmg` |
 
-## Implementation
+Debian packaging also requires `dpkg-deb` from the `dpkg` package. Builds are unsigned unless signing credentials are supplied.
 
-The UI uses plain HTML, CSS, and JavaScript with no frontend runtime dependencies. Web Audio buffers provide overlapping, low-latency playback. PCM sounds are bundled with the app. Uploaded audio is stored in IndexedDB and loaded when needed; notes and settings use local storage. Continuous profiles use automatic gain adjustment with peak headroom. Accepted crops are saved as stereo/mono PCM WAV copies, at up to 48 kHz, without an external encoder. Profile backups support up to 128 MB, including audio. Electron provides a sandboxed window and a narrow preload bridge; `uiohook-napi` supplies the optional system-wide listener. No keyboard text is passed through the native bridge.
-
-`src/profile-audio.js` contains the duration limit and loudness settings. `PROFILE_LOUDNESS_OFFSET_DB` defaults to `0` and adjusts the target for newly created/imported profiles relative to the five original presets. The baseline uses their median regular-key energy at `PROFILE_REFERENCE_KEYS_PER_SECOND = 6`; `PROFILE_PEAK_LIMIT_DBFS = -3` caps peaks. This is an energy-based reference rather than a fixed LUFS target. Saved gains are not changed retroactively.
-
-Run `python3 scripts/generate-assets.py` to refresh generated assets (Pillow is needed for icons). DM Sans is bundled under the SIL Open Font License in `src/assets/fonts/OFL.txt`. Application source and generated sounds/icons use the MIT license.
+Licensed under [MIT](LICENSE). Bundled DM Sans uses the [SIL Open Font License](src/assets/fonts/OFL.txt).
