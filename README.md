@@ -1,4 +1,28 @@
-# FunnyBoard
+<p align="center">
+  <img src="src/assets/icon.svg" width="72" height="72" alt="FunnyBoard logo">
+</p>
+
+<h1 align="center">FunnyBoard</h1>
+
+<p align="center">
+  <strong>Make every keystroke sound like you.</strong><br>
+  Wooden thocks, bubbly pops, or your own audio. Give your keyboard a little personality.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Nikita-Dudorov/FunnyBoard/releases/latest">Download the latest release</a>
+  · <a href="#use-it">How it works</a>
+  · <a href="#development">Build it yourself</a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/funnyboard-preview.gif" width="1080" alt="FunnyBoard in action: typing with Wooden mechanical, switching to Bubble pop, and assigning Pocket arcade to the Space key.">
+</p>
+
+<p align="center">
+  <em>Type. Switch moods. Make a key your own.</em><br>
+  <sub>Silent animated preview · <a href="docs/assets/funnyboard-preview.png">View a still screenshot</a></sub>
+</p>
 
 A desktop writing space with customizable keyboard sounds. Choose from six built-in profiles, assign sounds to individual keys, or create a continuous profile from your own audio.
 
