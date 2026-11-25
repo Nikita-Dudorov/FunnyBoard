@@ -2,19 +2,54 @@
 
 A little more joy in every keystroke. A desktop writing space with wooden mechanical sounds by default, six sound profiles, and a custom sound for any physical key.
 
-## Install and open
+## Download and install
 
-**Ubuntu / Debian:** open `release/funnyboard_1.0.5_amd64.deb` with your software installer, or run:
+Open the [latest FunnyBoard release](https://github.com/Nikita-Dudorov/FunnyBoard/releases/latest), or browse [all releases](https://github.com/Nikita-Dudorov/FunnyBoard/releases). Under **Assets**, download an installer for your operating system. The **Source code (zip)** and **Source code (tar.gz)** downloads contain the source for building the app yourself.
+
+**Ubuntu / Debian (64-bit x86):** download the `.deb` file. For version **1.0.5**, it is named `funnyboard_1.0.5_amd64.deb`. Open it with your software installer, or open a terminal in the folder containing the downloaded file and run:
+
+```bash
+sudo apt install ./funnyboard_1.0.5_amd64.deb
+```
+
+Use the filename you downloaded if installing another version. Then open **FunnyBoard** from your applications menu. Node.js and Python are not needed to use the installed app; `apt` installs required system libraries.
+
+**Portable Linux (optional):** if the release includes an AppImage, download it, make it executable in its file properties, and open it. AppImage requires FUSE. If FUSE is unavailable, run `./FunnyBoard-1.0.5.AppImage --appimage-extract` and open `squashfs-root/funnyboard`, adjusting the filename for your version. The `.deb` installer works on its own and does not require AppImage.
+
+**Windows and macOS:** when available in a release, download and open the Windows `.exe` installer or the macOS `.dmg`. If your release has no installer for your system, use the build instructions below.
+
+## Build an installer yourself
+
+Install [Node.js](https://nodejs.org/en/download) **22.12 or newer** and npm; **Node.js 24** is recommended and is used by the automated builds. Internet access is needed to download dependencies and build tools. Build on the operating system you plan to install on. The Linux Debian package currently targets **x86-64 / amd64** and requires `dpkg-deb`, which is supplied by the `dpkg` package on Ubuntu/Debian.
+
+Download **Source code (zip)** from the release you want to build, extract it, and open a terminal in the extracted folder containing `package.json`. Alternatively, clone the repository to build its latest source:
+
+```bash
+git clone https://github.com/Nikita-Dudorov/FunnyBoard.git
+cd FunnyBoard
+```
+
+Install the project dependencies:
+
+```bash
+npm ci
+```
+
+Then run the build command for your operating system:
+
+| Build system | Command | Files created in `release/` |
+| --- | --- | --- |
+| Ubuntu / Debian, x86-64 | `npm run dist:linux` | `.deb` installer and portable `.AppImage` |
+| Windows | `npm run dist:win` | `.exe` installer |
+| macOS | `npm run dist:mac` | `.dmg` disk image |
+
+The version in `package.json` determines the filenames. For example, building **1.0.5** on Ubuntu creates `release/funnyboard_1.0.5_amd64.deb` and `release/FunnyBoard-1.0.5.AppImage`. Install the Debian package from the project folder with:
 
 ```bash
 sudo apt install ./release/funnyboard_1.0.5_amd64.deb
 ```
 
-Then open **FunnyBoard** from your applications menu. The installer bundles everything; Node.js and Python are not needed.
-
-**Portable Linux:** make `release/FunnyBoard-1.0.5.AppImage` executable in its file properties and open it. AppImage requires FUSE. If FUSE is unavailable, run `./FunnyBoard-1.0.5.AppImage --appimage-extract` and open `squashfs-root/funnyboard`. The Debian installer is recommended on Ubuntu because it also configures the Chromium sandbox.
-
-**Windows and macOS:** native installer builds are configured and can be generated on their respective operating systems using the commands below or the included GitHub Actions workflow. Those installers have not been built or tested in this Linux workspace. Release builds are unsigned unless signing credentials are supplied.
+The generated `release/` folder is excluded from Git, so downloading or cloning the source does not include locally built installers. Windows and macOS builds are configured but have not been tested in this Linux workspace. Release builds are unsigned unless signing credentials are supplied.
 
 ## Use it
 
@@ -56,14 +91,13 @@ npm run check          # JavaScript syntax checks
 npm test               # Sound assets, profile validation, key mapping, note counts
 npm run test:ui        # Chrome integration tests
 npm run test:desktop   # Linux/X11 native integration test in temporary windows
-npm run dist:linux     # AppImage and .deb (requires dpkg-deb)
-npm run dist:win       # One-click Windows installer; run on Windows
-npm run dist:mac       # macOS disk image; run on macOS
 ```
+
+See [Build an installer yourself](#build-an-installer-yourself) for packaging commands.
 
 The UI tests use Google Chrome at `/usr/bin/google-chrome`; set `CHROME_PATH` to another Chrome/Chromium executable as needed. Desktop QA injects two XTest key presses into a temporary test window and needs Python 3 and an X11 session. Set `FUNNYBOARD_EXECUTABLE` to test a packaged app instead of the development build. It uses temporary app data, leaving your notes and profiles alone.
 
-The repository includes a manual/tag-triggered GitHub Actions workflow to build installers on Linux, Windows, and macOS and upload them as workflow artifacts. It does not publish releases.
+The repository includes a manual/tag-triggered GitHub Actions workflow to build installers on Linux, Windows, and macOS and upload them as workflow artifacts. Maintainers attach installer files to GitHub Releases separately; the workflow does not publish releases automatically.
 
 ## Implementation
 
