@@ -17,6 +17,10 @@ try {
   const page=await application.firstWindow();await page.waitForLoadState('domcontentloaded');
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await expect(page.locator('#profile-name')).toHaveText('Wooden mechanical');
+  await expect(page.locator('.key.selected')).toHaveCount(0);await expect(page.locator('#key-sound')).toBeDisabled();
+  await page.locator('#capture-key').click();await page.keyboard.press('Escape');
+  await expect(page.locator('#selected-key-name')).toHaveText('Escape');await page.locator('#clear-key-selection').click();
+  await expect(page.locator('.key.selected')).toHaveCount(0);
   if(process.env.FUNNYBOARD_QA_AUDIO){
     await page.locator('#browse-profiles').click();await page.locator('#new-audio-profile').click();
     await page.locator('#audio-profile-name').fill('Desktop audio check');
@@ -35,6 +39,32 @@ try {
   await page.locator('#editor').pressSequentially('A little more joy in every keystroke.',{delay:30});
   await expect(page.locator('#word-count')).toHaveText('7');
   await page.locator('#mute-button').click();await page.locator('#mute-button').click();
+  await page.evaluate(()=>{
+    window.bindingStarts=[];window.bindingActive=new Set();
+    const start=AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start=function(...args){
+      const sound={loop:this.loop};window.bindingStarts.push(sound);window.bindingActive.add(sound);
+      this.addEventListener('ended',()=>window.bindingActive.delete(sound));return start.apply(this,args);
+    };
+  });
+  await page.locator('[data-code="KeyQ"]').click();await page.locator('#key-sound').selectOption('durka');
+  await expect.poll(()=>page.evaluate(()=>window.bindingStarts.some(s=>s.loop))).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>window.bindingActive.size)).toBe(0);
+  await page.locator('#key-sound').focus();await page.evaluate(()=>window.bindingStarts=[]);
+  await page.keyboard.press('c');await expect(page.locator('#key-sound')).toHaveValue('creamy');await page.waitForTimeout(80);
+  expect(await page.evaluate(()=>window.bindingStarts)).toHaveLength(1);
+  await page.locator('#key-sound').selectOption('durka');
+  await expect.poll(()=>page.evaluate(()=>window.bindingStarts.some(s=>s.loop))).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>window.bindingActive.size)).toBe(0);
+  await page.locator('[data-code="KeyA"]').click();await expect.poll(()=>page.evaluate(()=>window.bindingActive.size)).toBe(0);
+  await page.locator('[data-code="KeyQ"]').focus();await page.evaluate(()=>window.bindingStarts=[]);
+  await page.keyboard.press('Space');await page.waitForTimeout(80);
+  expect(await page.evaluate(()=>window.bindingStarts.map(s=>s.loop))).toEqual([true]);
+  await page.evaluate(()=>window.bindingStarts=[]);await page.locator('#editor').press('a');await page.waitForTimeout(30);
+  const continuous=process.env.FUNNYBOARD_QA_AUDIO||PROFILES.find(profile=>profile.name===process.env.FUNNYBOARD_QA_PROFILE)?.continuous;
+  expect(await page.evaluate(()=>window.bindingStarts.map(s=>s.loop))).toEqual([Boolean(continuous)]);
+  expect(await page.evaluate(()=>window.bindingActive.size)).toBe(1);
+  await page.locator('#reset-key').click();await page.locator('#editor').press('Backspace');
   await page.evaluate(()=>{
     window.globalKeys=[];window.sourcesPlayed=0;
     window.funnyboard.onKey(key=>window.globalKeys.push(key));
@@ -58,7 +88,6 @@ try {
   execFileSync('python3',[path.resolve('scripts/test-x11-keys.py')]);
   // Other physical keys may arrive from an active desktop during this check.
   await expect.poll(()=>page.evaluate(()=>['KeyA','Space'].every(code=>window.globalKeys.some(key=>key.down&&key.code===code)))).toBe(true);
-  const continuous=process.env.FUNNYBOARD_QA_AUDIO||PROFILES.find(profile=>profile.name===process.env.FUNNYBOARD_QA_PROFILE)?.continuous;
   await expect.poll(()=>page.evaluate(()=>window.sourcesPlayed)).toBeGreaterThanOrEqual(continuous?1:2);
   await expect(page.locator('#editor')).toHaveValue('A little more joy in every keystroke.');
   // Muting must also suppress sounds from background key events.
@@ -76,5 +105,5 @@ try {
   await page.locator('#editor').fill('');await page.waitForTimeout(300);
   await page.screenshot({path:'/tmp/funnyboard-desktop.png',fullPage:true});
   expect(errors).toEqual([]);
-  console.log('Desktop QA passed: native window, typing, global key events, background audio, no captured text, and mode switching.');
+  console.log('Desktop QA passed: no startup selection, Escape picking, clearing selection, typing, per-key bindings without duplicate previews, global key events, background audio, and mode switching.');
 } finally {if(application)await application.close();await rm(userData,{recursive:true,force:true});}

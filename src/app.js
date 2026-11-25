@@ -9,8 +9,9 @@ const desktop=window.funnyboard;
 const assets=new Map();
 const engine=new SoundEngine({loadUpload:async id=>(await getAsset(id))?.data});
 let pendingProfileAudio=null,pendingProfileCrop=null,profileAudioURL=null,profileAudioRequest=0,automaticProfileName='';
-let selectedKey='KeyA', capturing=false, toastTimer, saveTimer, rhythmTimer, sessionStart=0, sessionKeys=0, previewToken=0;
+let selectedKey=null, capturing=false, uploadingKeyAudio=false, toastTimer, saveTimer, rhythmTimer, sessionStart=0, sessionKeys=0, previewToken=0;
 let storageWarning=false, soundWarning=false;
+let restoreEditorAfterSoundChange=false;
 const keyElements=new Map();
 const pressed=new Set();
 const allProfiles=()=>withProfileColors([...PROFILES,...settings.customProfiles]);
@@ -29,10 +30,12 @@ function audioError(error) {
   console.error('Audio error:',error);
   if(!soundWarning){toast('Audio could not start. Check your sound output, then try a sound preview.',true);soundWarning=true;}
 }
-async function play(code,binding=currentBinding(code),preview=false) {
+async function play(code,binding=currentBinding(code),preview=false,{sequence=false}={}) {
+  if(!sequence){previewToken++;if(preview)engine.cancelPreviews();}
   try {await engine.play(code,binding,{preview});} catch(error){audioError(error);}
 }
 function setMuted(muted,notify=true) {
+  if(muted)previewToken++;
   settings.muted=muted; engine.setMuted(muted);
   $('mute-button').setAttribute('aria-pressed',String(muted));
   $('mute-label').textContent=muted?'Sound is off':'Sound is on';
@@ -53,29 +56,38 @@ function renderKeyboard() {
       const button=document.createElement('button');button.className='key';button.dataset.code=code;button.textContent=label;
       button.style.setProperty('--key-width',String(width));
       button.setAttribute('aria-label',`Customize ${keyName(code)} key`);button.setAttribute('aria-pressed','false');button.title=`${keyName(code)} · click to customize`;
-      button.addEventListener('click',()=>{selectKey(code);void play(code,undefined,true);});
+      button.addEventListener('click',event=>{
+        stopCapture();
+        if(selectedKey===code){clearKeySelection();return;}
+        selectKey(code);void play(code,undefined,true);if(event.detail>0)$('editor').focus({preventScroll:true});
+      });
       keyElements.set(code,button);element.append(button);
     }
     element.dataset.row=String(rowIndex);$('keyboard').append(element);
   }
 }
 function selectKey(code) {
-  if(!validKeyCode(code)) return;
+  if(code!==null&&!validKeyCode(code)) return;
   selectedKey=code;
   for(const [key,element] of keyElements) {element.classList.toggle('selected',key===code);element.setAttribute('aria-pressed',String(key===code));}
-  const name=keyName(code);$('selected-key-name').textContent=name;
-  $('selected-keycap').textContent=name==='Space'?'⎵':name;
-  $('selected-keycap').classList.toggle('long-name',name.length>2);
+  const name=code?keyName(code):'No key selected';$('selected-key-name').textContent=name;
+  $('selected-keycap').textContent=code?(name==='Space'?'⎵':name):'—';
+  $('selected-keycap').classList.toggle('long-name',Boolean(code)&&name.length>2);
   updateBindingUI();
 }
+function clearKeySelection(){
+  stopCapture();previewToken++;engine.cancelPreviews();selectKey(null);$('editor').focus({preventScroll:true});
+}
 function updateBindingUI() {
-  const own=settings.bindings[`${settings.profile}:${selectedKey}`];
+  const hasKey=selectedKey!==null,own=hasKey?settings.bindings[`${settings.profile}:${selectedKey}`]:undefined;
   const select=$('key-sound');select.querySelectorAll('option[data-upload]').forEach(option=>option.remove());
+  select.disabled=!hasKey;$('preview-key').disabled=!hasKey;$('clear-key-selection').hidden=!hasKey;
+  $('upload-zone').disabled=!hasKey||uploadingKeyAudio;$('audio-file').disabled=!hasKey||uploadingKeyAudio;
   if(own?.type==='upload') {
     const option=document.createElement('option');option.value='upload';option.dataset.upload='true';option.textContent=own.name;select.append(option);select.value='upload';
   } else select.value=own?.sound||'default';
-  $('binding-type').textContent=own?'Custom sound':'Profile default';
-  $('binding-filename').textContent=own?.type==='upload'?own.name:(own?'A sound of its very own.':'A little personality goes a long way.');
+  $('binding-type').textContent=hasKey?(own?'Custom sound':'Profile default'):'Choose a key';
+  $('binding-filename').textContent=hasKey?(own?.type==='upload'?own.name:(own?'A sound of its very own.':'A little personality goes a long way.')):'Select a key to customize its sound.';
   $('binding-filename').title=own?.name||'';
   $('reset-key').hidden=!own;
   const count=Object.keys(settings.bindings).filter(key=>key.startsWith(`${settings.profile}:`)).length;
@@ -92,6 +104,7 @@ function updateProfileUI() {
 }
 async function selectProfile(id) {
   if(!allProfiles().some(profile=>profile.id===id)) return;
+  engine.stopPlayback();
   settings.profile=id;persist();updateProfileUI();$('profiles-dialog').close();
   toast(`${currentProfile().name}. Make yourself heard.`);
   void play('KeyA',undefined,true);
@@ -132,11 +145,12 @@ function icon(name) {
   const use=document.createElementNS('http://www.w3.org/2000/svg','use');use.setAttribute('href',`#i-${name}`);svg.append(use);return svg;
 }
 async function previewSequence(profile=currentProfile()) {
+  engine.cancelPreviews();
   const token=++previewToken;
   try {await engine.prepare();} catch(error){audioError(error);return;}
   for(const code of ['KeyF','KeyU','KeyN','Space','KeyN','KeyY','Enter']) {
     if(token!==previewToken) break;
-    pressVisual(code);void play(code,soundFor(code,profile,settings.bindings),true);
+    pressVisual(code);void play(code,soundFor(code,profile,settings.bindings),true,{sequence:true});
     await new Promise(resolve=>setTimeout(resolve,140));releaseVisual(code);
   }
 }
@@ -158,10 +172,10 @@ function saveCurrentNote() {
   catch {$('saved-status').lastChild.textContent=' Not saved — storage full';toast('Your note could not be saved. Download a copy using the arrow above.',true);}
 }
 async function uploadAudio(file) {
-  if(!file) return;
+  if(!file||!selectedKey||uploadingKeyAudio) return;
   if(file.size>5*1024*1024) {toast('Choose an audio file smaller than 5 MB.',true);return;}
   if(!/^(audio\/|video\/ogg)/.test(file.type) && !/\.(wav|mp3|ogg|m4a|flac|aac|webm)$/i.test(file.name)){toast('Choose an audio file, such as WAV, MP3, or OGG.',true);return;}
-  const button=$('upload-zone');button.disabled=true;
+  uploadingKeyAudio=true;updateBindingUI();
   const targetKey=selectedKey,targetProfile=settings.profile;
   try {
     const data=await file.arrayBuffer();const assetId=crypto.randomUUID();
@@ -173,7 +187,7 @@ async function uploadAudio(file) {
     persist();updateBindingUI();void play(targetKey,binding,true);toast(`Your sound is bound to ${keyName(targetKey)}.`);
     void cleanupUnusedAudio();
   } catch(error){console.error(error);toast('Could not read or save that sound. Try another short audio file.',true);}
-  finally{button.disabled=false;$('audio-file').value='';}
+  finally{uploadingKeyAudio=false;$('audio-file').value='';updateBindingUI();}
 }
 async function cleanupUnusedAudio() {
   const used=new Set(Object.values(settings.bindings).filter(binding=>binding.type==='upload').map(binding=>binding.assetId));
@@ -189,7 +203,7 @@ function resetProfileAudio(){
   pendingProfileAudio=null;pendingProfileCrop=null;$('profile-audio-crop').hidden=true;$('create-audio-profile-submit').disabled=true;$('profile-audio-file').value='';
 }
 function openAudioProfile(){
-  resetProfileAudio();engine.stopFlow();previewToken++;
+  resetProfileAudio();engine.stopPlayback();previewToken++;
   $('audio-profile-form').reset();automaticProfileName='';$('profile-audio-status').textContent='Choose one audio file to get started.';
   $('profile-audio-error').hidden=true;$('audio-profile-dialog').showModal();
 }
@@ -350,7 +364,7 @@ async function changeScope(scope) {
   } catch(error){toast('Everywhere could not start. FunnyBoard-only sounds are still available.',true);}
   finally{buttons.forEach(button=>button.disabled=false);}
 }
-function stopCapture() {capturing=false;$('capture-key').classList.remove('capturing');$('capture-key').querySelector('span').textContent='Pick any key';}
+function stopCapture() {capturing=false;$('capture-key').classList.remove('capturing');$('capture-key').setAttribute('aria-pressed','false');$('capture-key').querySelector('span').textContent='Pick any key';$('capture-key').title='Select a key by pressing it';}
 function setupEvents() {
   $('profile-audio-limits').textContent=`WAV, MP3, OGG, M4A · up to ${audioDurationLabel(MAX_PROFILE_AUDIO_SECONDS)} · ${MAX_PROFILE_AUDIO_BYTES/1024/1024} MB`;
   $('new-audio-profile').addEventListener('click',openAudioProfile);
@@ -365,40 +379,49 @@ function setupEvents() {
   $('profile-audio-choose').addEventListener('drop',event=>void loadProfileAudio(event.dataTransfer.files[0]));
   $('mute-button').addEventListener('click',()=>{void engine.prepare().catch(audioError);setMuted(!settings.muted);});
   $('volume').addEventListener('input',event=>setVolume(event.target.value));
-  $('volume').addEventListener('change',()=>void play(selectedKey,undefined,true));
+  $('volume').addEventListener('change',()=>void play(selectedKey||'KeyA',undefined,true));
   for(const id of ['profile-picker','browse-profiles'])$(id).addEventListener('click',()=>{renderProfiles();$('profiles-dialog').showModal();});
   $('preview-profile').addEventListener('click',()=>void previewSequence());
-  $('preview-key').addEventListener('click',()=>void play(selectedKey,undefined,true));
+  $('preview-key').addEventListener('click',()=>{if(selectedKey)void play(selectedKey,undefined,true);});
+  $('clear-key-selection').addEventListener('click',clearKeySelection);
   $('help-button').addEventListener('click',()=>$('help-dialog').showModal());
   document.querySelectorAll('.close-dialog').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
   document.querySelectorAll('dialog').forEach(dialog=>{
     dialog.addEventListener('click',event=>{if(event.target!==dialog)return;const rect=dialog.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)dialog.close();});
     dialog.addEventListener('close',()=>{previewToken++;});
   });
+  $('key-sound').addEventListener('pointerdown',()=>restoreEditorAfterSoundChange=true);
+  $('key-sound').addEventListener('keydown',()=>restoreEditorAfterSoundChange=false);
+  $('key-sound').addEventListener('blur',()=>restoreEditorAfterSoundChange=false);
   $('key-sound').addEventListener('change',event=>{
+    if(!selectedKey)return;
+    const restoreFocus=restoreEditorAfterSoundChange;restoreEditorAfterSoundChange=false;
     const value=event.target.value,key=`${settings.profile}:${selectedKey}`;
     if(value==='default')delete settings.bindings[key];else if(value!=='upload')settings.bindings[key]={type:'preset',sound:value};
     persist();updateBindingUI();void play(selectedKey,undefined,true);void cleanupUnusedAudio();
+    if(restoreFocus)$('editor').focus({preventScroll:true});
   });
-  $('reset-key').addEventListener('click',()=>{delete settings.bindings[`${settings.profile}:${selectedKey}`];persist();updateBindingUI();void cleanupUnusedAudio();toast(`${keyName(selectedKey)} is back to the profile default.`);});
+  $('reset-key').addEventListener('click',()=>{if(!selectedKey)return;delete settings.bindings[`${settings.profile}:${selectedKey}`];persist();updateBindingUI();void cleanupUnusedAudio();toast(`${keyName(selectedKey)} is back to the profile default.`);});
   $('upload-zone').addEventListener('click',()=>$('audio-file').click());
   $('audio-file').addEventListener('change',event=>void uploadAudio(event.target.files[0]));
   for(const name of ['dragenter','dragover'])$('upload-zone').addEventListener(name,event=>{event.preventDefault();$('upload-zone').classList.add('dragover');});
   for(const name of ['dragleave','drop'])$('upload-zone').addEventListener(name,event=>{event.preventDefault();$('upload-zone').classList.remove('dragover');});
   $('upload-zone').addEventListener('drop',event=>void uploadAudio(event.dataTransfer.files[0]));
   document.addEventListener('dragover',event=>event.preventDefault());document.addEventListener('drop',event=>event.preventDefault());
-  $('capture-key').addEventListener('click',()=>{if(capturing){stopCapture();return;}capturing=true;$('capture-key').classList.add('capturing');$('capture-key').querySelector('span').textContent='Press a key… (Esc cancels)';});
+  $('capture-key').addEventListener('click',()=>{if(capturing){stopCapture();$('editor').focus({preventScroll:true});return;}capturing=true;$('capture-key').classList.add('capturing');$('capture-key').setAttribute('aria-pressed','true');$('capture-key').querySelector('span').textContent='Press any key… Cancel';$('capture-key').title='Press any key, including Esc. Click to cancel.';});
   document.addEventListener('keydown',event=>{
-    if(capturing){event.preventDefault();event.stopPropagation();if(event.code!=='Escape'){selectKey(event.code);void play(event.code,undefined,true);}stopCapture();return;}
+    if(capturing){event.preventDefault();event.stopPropagation();if(event.repeat||!validKeyCode(event.code))return;selectKey(event.code);void play(event.code,undefined,true);stopCapture();$('editor').focus({preventScroll:true});return;}
     if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.code==='KeyM'){event.preventDefault();if(!event.repeat)setMuted(!settings.muted);return;}
     if($('audio-profile-dialog').open)return;
+    // Controls handle their own navigation, activation and sound previews.
+    if(event.target!==$('editor')&&event.target.closest?.('button,a,input,select,textarea,[contenteditable],dialog'))return;
     if(!event.code || event.repeat || pressed.has(event.code))return;
     pressed.add(event.code);pressVisual(event.code);void play(event.code);
     if(event.target===$('editor') && !event.ctrlKey && !event.metaKey && (event.key.length===1||event.code==='Enter')){if(!sessionStart)sessionStart=Date.now();sessionKeys++;animateTyping();}
     if(event.target===$('editor')&&event.code==='Tab'){event.preventDefault();const editor=$('editor');editor.setRangeText('  ',editor.selectionStart,editor.selectionEnd,'end');editor.dispatchEvent(new Event('input',{bubbles:true}));}
   });
   document.addEventListener('keyup',event=>{pressed.delete(event.code);releaseVisual(event.code);});
-  window.addEventListener('blur',()=>{pressed.clear();for(const [code] of keyElements)releaseVisual(code);if(settings.scope==='app')engine.stopFlow();stopCapture();saveCurrentNote();});
+  window.addEventListener('blur',()=>{pressed.clear();for(const [code] of keyElements)releaseVisual(code);if(settings.scope==='app'){previewToken++;engine.stopPlayback();}stopCapture();saveCurrentNote();});
   $('editor').addEventListener('input',()=>{updateStats();$('saved-status').lastChild.textContent=' Saving…';clearTimeout(saveTimer);saveTimer=setTimeout(saveCurrentNote,200);});
   window.addEventListener('beforeunload',saveCurrentNote);
   $('export-note').addEventListener('click',exportNote);

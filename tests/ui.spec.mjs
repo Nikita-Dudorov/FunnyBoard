@@ -16,19 +16,143 @@ async function createFromAudio(page,name,buffer){
   await expect(page.locator('#create-audio-profile-submit')).toBeEnabled();await page.locator('#create-audio-profile-submit').click();await expect(page.locator('#profile-name')).toHaveText(name);
 }
 
-test('one uploaded sample creates a normalized continuous profile and survives restart and cleanup',async({page})=>{
+async function trackPlayback(page){
   await page.addInitScript(()=>{
-    window.flowStarts=[];const original=AudioBufferSourceNode.prototype.start;
-    AudioBufferSourceNode.prototype.start=function(...args){window.flowStarts.push({duration:this.buffer.duration,offset:args[1]||0,channels:this.buffer.numberOfChannels});return original.apply(this,args);};
+    window.playbackStarts=[];window.playbackActive=new Set();
+    const original=AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start=function(...args){
+      const entry={duration:this.buffer.duration,loop:this.loop,channels:this.buffer.numberOfChannels,offset:args[1]||0,rate:this.playbackRate.value};window.playbackStarts.push(entry);window.playbackActive.add(entry);
+      this.addEventListener('ended',()=>window.playbackActive.delete(entry));return original.apply(this,args);
+    };
   });
+}
+
+test('startup and normal typing leave every key unselected',async({page})=>{
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));await trackPlayback(page);await page.goto('/');
+  await expect(page.locator('.key.selected')).toHaveCount(0);await expect(page.locator('#selected-key-name')).toHaveText('No key selected');
+  for(const id of ['key-sound','preview-key','upload-zone','audio-file'])await expect(page.locator(`#${id}`)).toBeDisabled();
+  await expect(page.locator('#clear-key-selection')).toBeHidden();
+  await page.locator('#editor').pressSequentially('abc',{delay:80});
+  await expect(page.locator('#editor')).toHaveValue('abc');await expect.poll(()=>page.evaluate(()=>window.playbackStarts.length)).toBeGreaterThan(0);
+  await expect(page.locator('.key.selected')).toHaveCount(0);
+  const starts=await page.evaluate(()=>window.playbackStarts.length);await page.locator('#volume').fill('37');
+  await expect.poll(()=>page.evaluate(()=>window.playbackStarts.length)).toBeGreaterThan(starts);
+  await expect(page.locator('#key-sound')).toBeDisabled();expect(errors).toEqual([]);
+});
+
+test('clearing and toggling a selection preserve its saved binding across reload',async({page})=>{
+  await page.goto('/');const key=page.locator('[data-code="KeyQ"]');await key.click();await page.locator('#key-sound').selectOption('arcade');
+  await page.getByRole('button',{name:'Clear selection',exact:true}).click();
+  await expect(page.locator('.key.selected')).toHaveCount(0);await expect(page.locator('#key-sound')).toBeDisabled();
+  await expect(page.locator('#binding-count')).toHaveText('1 custom binding');await expect(key).toHaveClass(/custom/);
+  await key.click();await expect(page.locator('#key-sound')).toHaveValue('arcade');await key.click();
+  await expect(page.locator('.key.selected')).toHaveCount(0);await expect(page.locator('#editor')).toBeFocused();
+  await page.reload();await expect(page.locator('.key.selected')).toHaveCount(0);await expect(page.locator('#preview-key')).toBeDisabled();
+  await key.click();await expect(page.locator('#key-sound')).toHaveValue('arcade');
+});
+
+test('Pick any key captures Escape and its binding plays once',async({page})=>{
+  await trackPlayback(page);await page.goto('/');await page.locator('#capture-key').click();await page.keyboard.press('Escape');
+  await expect(page.locator('#selected-key-name')).toHaveText('Escape');await expect(page.locator('[data-code="Escape"]')).toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('#capture-key')).toHaveAttribute('aria-pressed','false');await expect(page.locator('#editor')).toBeFocused();
+  await page.locator('#key-sound').selectOption('arcade');await expect.poll(()=>page.evaluate(()=>window.playbackActive.size)).toBe(0);
+  await page.evaluate(()=>window.playbackStarts=[]);await page.locator('#editor').press('Escape');
+  await expect.poll(()=>page.evaluate(()=>window.playbackStarts.length)).toBe(1);
+  const bindings=await page.evaluate(()=>JSON.parse(localStorage.getItem('funnyboard.settings.v1')).bindings);
+  expect(bindings['wood:Escape']).toEqual({type:'preset',sound:'arcade'});
+});
+
+test('clicking the picking button again cancels without changing the selection',async({page})=>{
+  await page.goto('/');const picker=page.locator('#capture-key');
+  await picker.click();await expect(picker).toHaveAttribute('aria-pressed','true');await picker.click();
+  await expect(picker).toHaveAttribute('aria-pressed','false');await expect(page.locator('.key.selected')).toHaveCount(0);
+  await page.locator('[data-code="KeyQ"]').click();await picker.click();await picker.click();
+  await expect(page.locator('#selected-key-name')).toHaveText('Q');await expect(page.locator('#editor')).toBeFocused();
+});
+
+test('editing a key sound with the keyboard plays only its preview',async({page})=>{
+  await trackPlayback(page);await page.goto('/');await page.locator('[data-code="KeyQ"]').click();
+  await page.locator('#key-sound').selectOption('durka');await expect.poll(()=>page.evaluate(()=>window.playbackStarts.some(s=>s.loop))).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>window.playbackActive.size)).toBe(0);
+  await page.locator('#key-sound').focus();await page.evaluate(()=>window.playbackStarts=[]);
+  await page.keyboard.press('c');await expect(page.locator('#key-sound')).toHaveValue('creamy');
+  await page.waitForTimeout(80);
+  expect(await page.evaluate(()=>window.playbackStarts.length)).toBe(1);
+});
+
+for(const activation of ['Space','Enter'])test(`${activation} on a focused visual key plays only its preview`,async({page})=>{
+  await trackPlayback(page);await page.goto('/');await page.locator('[data-code="KeyQ"]').click();
+  await page.locator('#key-sound').selectOption('durka');await expect.poll(()=>page.evaluate(()=>window.playbackStarts.some(s=>s.loop))).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>window.playbackActive.size)).toBe(0);
+  await page.locator('[data-code="KeyA"]').click();await expect.poll(()=>page.evaluate(()=>window.playbackActive.size)).toBe(0);
+  await page.locator('[data-code="KeyQ"]').focus();await page.evaluate(()=>window.playbackStarts=[]);
+  await page.keyboard.press(activation);await page.waitForTimeout(80);
+  const starts=await page.evaluate(()=>window.playbackStarts);expect(starts).toHaveLength(1);expect(starts[0].loop).toBe(true);
+});
+
+test('typing uses each physical key binding and cancels the selected key preview',async({page})=>{
+  await trackPlayback(page);await page.goto('/');await page.locator('[data-code="KeyQ"]').click();
+  await page.locator('#key-sound').dispatchEvent('pointerdown');await page.locator('#key-sound').selectOption('durka');
+  await expect(page.locator('#editor')).toBeFocused();await expect.poll(()=>page.evaluate(()=>window.playbackStarts.some(s=>s.loop))).toBe(true);
+  await page.evaluate(()=>window.playbackStarts=[]);await page.keyboard.press('a');await page.waitForTimeout(30);
+  expect(await page.evaluate(()=>window.playbackStarts.map(s=>s.loop))).toEqual([false]);
+  expect(await page.evaluate(()=>[...window.playbackActive].some(s=>s.loop))).toBe(false);
+  await page.keyboard.press('q');await page.waitForTimeout(30);
+  expect(await page.evaluate(()=>window.playbackStarts.map(s=>s.loop))).toEqual([false,true]);
+  expect(await page.evaluate(()=>[...window.playbackActive].map(s=>s.loop))).toEqual([true]);
+  await page.keyboard.press('s');await page.waitForTimeout(30);
+  expect(await page.evaluate(()=>window.playbackStarts.map(s=>s.loop))).toEqual([false,true,false]);
+  expect(await page.evaluate(()=>[...window.playbackActive].map(s=>s.loop))).toEqual([false]);
+  await expect(page.locator('#selected-key-name')).toHaveText('Q');await expect(page.locator('#key-sound')).toHaveValue('durka');
+});
+
+test('returning to a continuous profile stops an unfinished short override',async({page})=>{
+  await trackPlayback(page);await page.goto('/');await page.locator('#browse-profiles').click();
+  await page.getByRole('button',{name:'Use Durka profile',exact:true}).click();
+  await page.locator('[data-code="KeyQ"]').click();await page.locator('#key-sound').selectOption('wood');
+  await expect.poll(()=>page.evaluate(()=>window.playbackStarts.some(s=>!s.loop))).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>window.playbackActive.size)).toBe(0);await page.evaluate(()=>window.playbackStarts=[]);
+  await page.locator('#editor').press('q');await page.keyboard.press('a');await page.waitForTimeout(30);
+  expect(await page.evaluate(()=>window.playbackStarts.map(s=>s.loop))).toEqual([false,true]);
+  expect(await page.evaluate(()=>[...window.playbackActive].map(s=>s.loop))).toEqual([true]);
+});
+
+test('normal typing cancels the rest of a profile preview sequence',async({page})=>{
+  await trackPlayback(page);await page.goto('/');await page.locator('#preview-profile').click();
+  await expect.poll(()=>page.evaluate(()=>window.playbackStarts.length)).toBeGreaterThan(0);
+  await page.evaluate(()=>window.playbackStarts=[]);await page.locator('#editor').press('a');await page.waitForTimeout(1100);
+  expect(await page.evaluate(()=>window.playbackStarts)).toHaveLength(1);
+});
+
+test('a slow audio load cannot play after a newer key press',async({page})=>{
+  await trackPlayback(page);await page.goto('/');
+  await page.evaluate(async()=>{
+    const {SoundEngine}=await import('/audio.js');
+    window.testEngine=new SoundEngine({loadUpload:()=>new Promise(resolve=>window.finishAudioLoad=resolve)});
+    await window.testEngine.prepare();
+    window.pendingPlayback=window.testEngine.play('KeyQ',{type:'flow',assetId:'slow',gain:1});
+  });
+  await expect.poll(()=>page.evaluate(()=>typeof window.finishAudioLoad)).toBe('function');
+  await page.evaluate(async()=>{
+    await window.testEngine.play('KeyA',{type:'preset',sound:'wood'});
+    window.finishAudioLoad(window.testEngine.raw.get('durka-flow'));await window.pendingPlayback;
+  });
+  expect(await page.evaluate(()=>window.playbackStarts.map(s=>s.loop))).toEqual([false]);
+  await page.evaluate(async()=>{window.testEngine.stopPlayback();await window.testEngine.context.close();});
+});
+
+test('one uploaded sample creates a normalized continuous profile and survives restart and cleanup',async({page})=>{
+  await trackPlayback(page);
   await page.goto('/');await createFromAudio(page,'Quiet Ocean',audioFile());
   const profile=await page.evaluate(()=>{const s=JSON.parse(localStorage.getItem('funnyboard.settings.v1'));return s.customProfiles.find(p=>p.id===s.profile);});
   expect(profile.continuous).toBe(true);expect(profile.gain).toBeGreaterThan(1);
+  await expect.poll(()=>page.evaluate(()=>window.playbackStarts.some(s=>Math.abs(s.duration-4)<.001))).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>window.playbackActive.size)).toBe(0);await page.evaluate(()=>window.playbackStarts=[]);
   await page.locator('#editor').pressSequentially('abcd',{delay:100});
-  expect(await page.evaluate(()=>window.flowStarts.filter(s=>Math.abs(s.duration-4)<.001).length)).toBe(1);
-  await page.locator('#key-sound').selectOption('wood');await page.locator('#reset-key').click();
+  expect(await page.evaluate(()=>window.playbackStarts.filter(s=>Math.abs(s.duration-4)<.001).length)).toBe(1);
+  await page.locator('[data-code="KeyA"]').click();await page.locator('#key-sound').selectOption('wood');await page.locator('#reset-key').click();
   await page.reload();await expect(page.locator('#profile-name')).toHaveText('Quiet Ocean');
-  await page.locator('#editor').press('KeyA');await expect.poll(()=>page.evaluate(()=>window.flowStarts.some(s=>Math.abs(s.duration-4)<.001&&s.channels===2))).toBe(true);
+  await page.locator('#editor').press('KeyA');await expect.poll(()=>page.evaluate(()=>window.playbackStarts.some(s=>Math.abs(s.duration-4)<.001&&s.channels===2))).toBe(true);
   const ids=await page.evaluate(async()=>{const store=await import('/store.js');return store.getSoundIds();});expect(ids).toContain(profile.audioAssetId);
   await createFromAudio(page,'Loud Ocean',audioFile({amplitude:.8}));
   const loud=await page.evaluate(()=>{const s=JSON.parse(localStorage.getItem('funnyboard.settings.v1'));return s.customProfiles.find(p=>p.id===s.profile);});
@@ -37,7 +161,7 @@ test('one uploaded sample creates a normalized continuous profile and survives r
 
 test('continuous profile export/import keeps the full file and recomputes loudness',async({page})=>{
   const buffer=audioFile({amplitude:.01,duration:5});await page.goto('/');await createFromAudio(page,'My audio',buffer);
-  await page.locator('#key-sound').selectOption('arcade');await page.locator('#browse-profiles').click();
+  await page.locator('[data-code="KeyA"]').click();await page.locator('#key-sound').selectOption('arcade');await page.locator('#browse-profiles').click();
   const promise=page.waitForEvent('download');await page.locator('#export-profile').click();const download=await promise;
   const filename=await download.path();const data=JSON.parse(await readFile(filename,'utf8'));
   expect(data.version).toBe(2);expect(Buffer.from(data.audio.data.split(',')[1],'base64').equals(buffer)).toBe(true);
@@ -115,37 +239,31 @@ test('declining a crop can choose another file without saving the long audio',as
 
 test('Durka keeps one continuous stream while typing, pauses and resumes its cursor',async({page})=>{
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
-  await page.addInitScript(()=>{
-    window.durkaStarts=[];window.durkaActive=0;
-    const original=AudioBufferSourceNode.prototype.start;
-    AudioBufferSourceNode.prototype.start=function(...args){
-      window.durkaStarts.push({duration:this.buffer.duration,channels:this.buffer.numberOfChannels,offset:args[1]||0,rate:this.playbackRate.value});
-      window.durkaActive++;this.addEventListener('ended',()=>window.durkaActive--);
-      return original.apply(this,args);
-    };
-  });
+  await trackPlayback(page);
   await page.goto('/');await page.locator('#browse-profiles').click();
   await page.getByRole('button',{name:'Use Durka profile',exact:true}).click();
   await expect(page.locator('#profile-name')).toHaveText('Durka');
+  await expect.poll(()=>page.evaluate(()=>window.playbackStarts.some(s=>s.loop))).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>window.playbackActive.size)).toBe(0);await page.evaluate(()=>window.playbackStarts=[]);
   await page.locator('#editor').pressSequentially('abcdefghij',{delay:100});
   await page.locator('#editor').press('Space');await page.locator('#editor').press('Enter');
   const wav=await readFile(path.resolve('src/assets/sounds/durka-flow.wav'));
   const duration=(wav.length-44)/(wav.readUInt32LE(24)*wav.readUInt16LE(22)*2);
-  const starts=await page.evaluate(()=>window.durkaStarts);
+  const starts=await page.evaluate(()=>window.playbackStarts);
   expect(starts).toHaveLength(1);expect(starts[0].duration).toBeCloseTo(duration,3);
   expect(starts[0].channels).toBe(2);expect(starts[0].rate).toBe(1);
-  await expect.poll(()=>page.evaluate(()=>window.durkaActive)).toBe(0);
+  await expect.poll(()=>page.evaluate(()=>window.playbackActive.size)).toBe(0);
   await page.locator('#editor').press('KeyA');
-  await expect.poll(()=>page.evaluate(()=>window.durkaStarts.length)).toBe(2);
-  expect(await page.evaluate(()=>window.durkaStarts[1].offset)).toBeGreaterThan(0.5);
+  await expect.poll(()=>page.evaluate(()=>window.playbackStarts.length)).toBe(2);
+  expect(await page.evaluate(()=>window.playbackStarts[1].offset)).toBeGreaterThan(0.5);
   await page.locator('#mute-button').click();
-  await expect.poll(()=>page.evaluate(()=>window.durkaActive)).toBe(0);
+  await expect.poll(()=>page.evaluate(()=>window.playbackActive.size)).toBe(0);
   await page.locator('#mute-button').click();
-  await page.locator('#key-sound').selectOption('wood');
+  await page.locator('[data-code="KeyA"]').click();await page.locator('#key-sound').selectOption('wood');
   await expect(page.locator('#binding-type')).toHaveText('Custom sound');
-  await expect.poll(()=>page.evaluate(()=>window.durkaActive)).toBe(0);
+  await expect.poll(()=>page.evaluate(()=>window.playbackActive.size)).toBe(0);
   await page.reload();await expect(page.locator('#profile-name')).toHaveText('Durka');
-  await page.locator('#key-sound').selectOption('durka');await expect(page.locator('#binding-type')).toHaveText('Custom sound');
+  await page.locator('[data-code="KeyA"]').click();await page.locator('#key-sound').selectOption('durka');await expect(page.locator('#binding-type')).toHaveText('Custom sound');
   expect(errors).toEqual([]);
 });
 
@@ -187,7 +305,7 @@ test('notes download without data loss and clear requires confirmation',async({p
   await page.locator('#clear-note').click();await page.locator('#confirm-clear').click();await page.reload();await expect(page.locator('#editor')).toHaveValue('');
 });
 test('a profile exports and imports with embedded custom audio',async({page})=>{
-  await page.goto('/');await page.locator('#audio-file').setInputFiles(path.resolve('src/assets/sounds/wood-key.wav'));
+  await page.goto('/');await page.locator('[data-code="KeyA"]').click();await page.locator('#audio-file').setInputFiles(path.resolve('src/assets/sounds/wood-key.wav'));
   await expect(page.locator('#key-sound')).toHaveValue('upload');
   await page.locator('#browse-profiles').click();
   const promise=page.waitForEvent('download');await page.locator('#export-profile').click();const download=await promise;

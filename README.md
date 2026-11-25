@@ -4,15 +4,15 @@ A little more joy in every keystroke. A desktop writing space with wooden mechan
 
 ## Install and open
 
-**Ubuntu / Debian:** open `release/funnyboard_1.0.3_amd64.deb` with your software installer, or run:
+**Ubuntu / Debian:** open `release/funnyboard_1.0.4_amd64.deb` with your software installer, or run:
 
 ```bash
-sudo apt install ./release/funnyboard_1.0.3_amd64.deb
+sudo apt install ./release/funnyboard_1.0.4_amd64.deb
 ```
 
 Then open **FunnyBoard** from your applications menu. The installer bundles everything; Node.js and Python are not needed.
 
-**Portable Linux:** make `release/FunnyBoard-1.0.3.AppImage` executable in its file properties and open it. AppImage requires FUSE. If FUSE is unavailable, run `./FunnyBoard-1.0.3.AppImage --appimage-extract` and open `squashfs-root/funnyboard`. The Debian installer is recommended on Ubuntu because it also configures the Chromium sandbox.
+**Portable Linux:** make `release/FunnyBoard-1.0.4.AppImage` executable in its file properties and open it. AppImage requires FUSE. If FUSE is unavailable, run `./FunnyBoard-1.0.4.AppImage --appimage-extract` and open `squashfs-root/funnyboard`. The Debian installer is recommended on Ubuntu because it also configures the Chromium sandbox.
 
 **Windows and macOS:** native installer builds are configured and can be generated on their respective operating systems using the commands below or the included GitHub Actions workflow. Those installers have not been built or tested in this Linux workspace. Release builds are unsigned unless signing credentials are supplied.
 
@@ -20,7 +20,7 @@ Then open **FunnyBoard** from your applications menu. The installer bundles ever
 
 1. Start typing in the writing space. Wooden mechanical sounds are selected automatically.
 2. Open **Set the mood** to select **Wooden mechanical**, **Creamy switches**, **Vintage typewriter**, **Pocket arcade**, **Bubble pop**, or **Durka**. Each includes a preview. Durka continues smoothly as you type, fades when you pause, and resumes from its previous position. The other profiles have distinct sounds for regular keys, Space, and Enter.
-3. Click a key on the visual keyboard to customize it. Choose another built-in sound or drop an audio file on the sound panel. Use **Pick any key** for keys outside the drawing, including numpad keys. WAV, MP3, OGG, M4A, FLAC, AAC and WebM are accepted when the platform decoder supports them; clips must be at most 3 seconds and 5 MB. The physical key position is used regardless of your typing language.
+3. The app starts with no key selected. Click a key on the visual keyboard to customize it, then choose another built-in sound or drop an audio file on the sound panel. Click that key again or use **Clear selection** to deselect it; its saved sound stays assigned. **Pick any key** accepts every key, including Esc and numpad keys. Click the picking button again to cancel. WAV, MP3, OGG, M4A, FLAC, AAC and WebM are accepted when the platform decoder supports them; clips must be at most 3 seconds and 5 MB. The physical key position is used regardless of your typing language.
 4. Choose **FunnyBoard only** or **Everywhere**. Everywhere plays sounds in other apps, including while FunnyBoard is minimized. Closing its window in this mode keeps it in the system tray. The tray menu opens, mutes, or quits the app. In FunnyBoard-only mode, closing the window quits.
 5. Use the volume slider and sound toggle. **Ctrl/Cmd + Shift + M** toggles sound while FunnyBoard is focused. Explicit preview buttons play a sample even when typing sounds are muted.
 

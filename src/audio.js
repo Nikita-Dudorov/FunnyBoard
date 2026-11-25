@@ -7,7 +7,7 @@ const FLOW_FADE_MS=70;
 export class SoundEngine {
   constructor({loadUpload}={}) {
     this.context=null; this.master=null; this.buffers=new Map(); this.raw=new Map(); this.pending=new Map();
-    this.volume=0.65; this.muted=false; this.sources=new Set();
+    this.volume=0.65; this.muted=false; this.sources=new Map();this.playRequest=0;this.previewEpoch=0;
     this.flow=null;this.flowOffsets=new Map();this.flowIdleTimer=null;this.flowStopTimer=null;
     this.loadUpload=loadUpload;this.uploadLoads=new Map();this.previewNode=null;this.previewGain=null;this.previewLevel=1;
     this.ready = Promise.all(PRESET_FILES.map(id=>
@@ -23,7 +23,19 @@ export class SoundEngine {
     await this.ready;
   }
   setVolume(value) { this.volume=Math.max(0,Math.min(1,Number(value))); if(this.master) this.master.gain.setTargetAtTime(this.muted?0:this.volume,this.context.currentTime,0.008);if(this.previewGain)this.previewGain.gain.setTargetAtTime(this.volume*this.previewLevel,this.context.currentTime,.008); }
-  setMuted(muted) { this.muted=Boolean(muted); if(this.muted)this.stopFlow(); this.setVolume(this.volume); }
+  setMuted(muted) { this.muted=Boolean(muted);this.setVolume(this.volume);if(this.muted)this.stopPlayback(); }
+  stopShortSound(source,details){
+    const now=this.context.currentTime,end=now+.008;
+    details.gain.gain.cancelAndHoldAtTime(now);details.gain.gain.linearRampToValueAtTime(0,end);
+    source.stop(end);this.sources.delete(source);
+  }
+  stopShortSounds(){for(const [source,details]of this.sources)this.stopShortSound(source,details);}
+  cancelPreviews(){
+    this.previewEpoch++;
+    if(this.flow?.preview)this.stopFlow();
+    for(const [source,details]of this.sources)if(details.preview)this.stopShortSound(source,details);
+  }
+  stopPlayback(){this.playRequest++;this.cancelPreviews();this.stopFlow();this.stopShortSounds();}
   stopFlow() {
     clearTimeout(this.flowIdleTimer);clearTimeout(this.flowStopTimer);
     const flow=this.flow;if(!flow)return;
@@ -34,6 +46,7 @@ export class SoundEngine {
     flow.source.stop(end);
   }
   playFlow(buffer,sound,preview,level=1) {
+    this.stopShortSounds();
     const bypassMaster=preview&&this.muted;
     if(this.flow&&(this.flow.sound!==sound||this.flow.bypassMaster!==bypassMaster))this.stopFlow();
     clearTimeout(this.flowIdleTimer);clearTimeout(this.flowStopTimer);
@@ -42,11 +55,12 @@ export class SoundEngine {
       const gain=this.context.createGain();gain.gain.value=0;
       source.connect(gain);gain.connect(bypassMaster?this.context.destination:this.master);
       const offset=(this.flowOffsets.get(sound)||0)%buffer.duration;
-      const flow={source,gain,sound,offset,startedAt:this.context.currentTime,bypassMaster};this.flow=flow;
+      const flow={source,gain,sound,offset,startedAt:this.context.currentTime,bypassMaster,preview};this.flow=flow;
       source.onended=()=>{source.disconnect();gain.disconnect();};
       source.start(flow.startedAt,offset);
     }
     const flow=this.flow,now=this.context.currentTime;
+    flow.preview=preview;
     flow.gain.gain.cancelAndHoldAtTime(now);
     flow.gain.gain.linearRampToValueAtTime(level*(bypassMaster?this.volume:1),now+0.006);
     // A new press extends this same stream. After a pause, resume its cursor.
@@ -86,8 +100,11 @@ export class SoundEngine {
     const buffer=await this.decode(id,data);return{buffer,data};
   }
   async play(code,binding,{preview=false}={}) {
+    if(!preview)this.cancelPreviews();
+    const request=++this.playRequest,epoch=this.previewEpoch;
     if(this.muted && !preview) return;
     await this.unlock();
+    if(request!==this.playRequest||(preview&&epoch!==this.previewEpoch))return;
     if(this.muted && !preview)return;
     const profile=binding.type==='preset'?PROFILES.find(profile=>profile.sound===binding.sound):null;
     const kind=code==='Space'?'space':(/Enter/.test(code)?'enter':'key');
@@ -99,17 +116,19 @@ export class SoundEngine {
       await this.uploadLoads.get(id);
     }
     if(!buffer && this.raw.has(id)) buffer=await this.decode(id,this.raw.get(id));
+    // A late load must not add an old sound over a newer press or preview.
+    if(request!==this.playRequest||(preview&&epoch!==this.previewEpoch))return;
     if(!buffer){if(uploaded)throw new Error('Saved audio is unavailable.');return;}
     if(this.muted&&!preview)return;
     if(profile?.continuous||binding.type==='flow'){this.playFlow(buffer,uploaded?id:binding.sound,preview,binding.type==='flow'&&Number.isFinite(binding.gain)?Math.max(0,Math.min(1e6,binding.gain)):1);return;}
     this.stopFlow();
     // Bound concurrency so long uploads cannot pile up while typing quickly.
-    if(this.sources.size>=24) this.sources.values().next().value.stop();
+    if(this.sources.size>=24){const [oldest,details]=this.sources.entries().next().value;this.stopShortSound(oldest,details);}
     const source=this.context.createBufferSource(); source.buffer=buffer;
     const gain=this.context.createGain(); gain.gain.value=preview && this.muted ? this.volume : 1;
     if(binding.type!=='upload') source.playbackRate.value=0.96+((code.charCodeAt(code.length-1)||0)%9)*0.01;
     source.connect(gain); gain.connect(preview && this.muted?this.context.destination:this.master);
-    this.sources.add(source); source.onended=()=>{this.sources.delete(source);source.disconnect();gain.disconnect();};
+    this.sources.set(source,{gain,preview}); source.onended=()=>{this.sources.delete(source);source.disconnect();gain.disconnect();};
     source.start();
   }
 }
